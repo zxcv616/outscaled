@@ -4,10 +4,11 @@ Machine learning platform that predicts League of Legends player props using pro
 
 ## ✨ Features
 
-- **🔍 Smart Player Search**: Autocomplete search with 2,500+ professional players from Oracle's Elixir dataset
+- **🔍 Smart Player Search**: Autocomplete search with 3,944+ professional players from Oracle's Elixir dataset
 - **🤖 ML Predictions**: AI-powered OVER/UNDER predictions for kills, assists, CS, deaths, gold, and damage
 - **📊 Advanced Analytics**: Statistical reasoning with trend analysis, volatility, z-scores, and performance differentials
-- **🎯 Real Data**: Powered by Oracle's Elixir professional match dataset (177,660 matches, 3,945 players from 2024-2025)
+- **🎯 Multi-Year Data**: Powered by Oracle's Elixir professional match dataset (162,833 matches, 3,944 players from 2024-2025)
+- **📅 Data Year Tracking**: API responses include data year distribution (e.g., "2024 (108 matches), 2025 (67 matches)")
 - **🎨 Beautiful UI**: Glass-morphism design with blurred background and professional interface
 - **⚡ Extreme Value Handling**: Smart detection of unrealistic prop values with logical responses
 - **📈 Comprehensive Testing**: Full test suite covering all API endpoints and edge cases
@@ -98,6 +99,7 @@ Machine learning platform that predicts League of Legends player props using pro
     "avg_assists": 5.5,
     "avg_cs": 256,
     "win_rate": 0.636,
+    "data_years": "2024 (108 matches), 2025 (67 matches)",
     "maps_played": 2,
     "map_range_warning": "",
     "recent_matches": [...]
@@ -134,17 +136,40 @@ pytest tests/test_api.py -v
 - ✅ Model information endpoints
 - ✅ Feature importance analysis
 - ✅ Deterministic predictions (same inputs = same outputs)
+- ✅ Data year tracking in API responses
 
 ## 📊 Data Sources
 
 - **Primary**: Oracle's Elixir professional match dataset (2024-2025)
-  - 177,660 matches analyzed (100,956 from 2024, 76,704 from 2025)
-  - 3,945 professional players (1,542 players in both years)
-  - 636 unique teams across multiple leagues
+  - **162,833 total matches** (92,543 from 2024, 70,290 from 2025)
+  - **3,944 unique players** (1,542 players with data in both years)
+  - **636 unique teams** across multiple leagues
+  - **58 unique leagues** with comprehensive coverage
+  - **Extended temporal coverage**: January 2024 to July 2025
+  - **Cross-year player tracking**: Historical performance patterns
+  - **Enhanced model training**: More diverse and comprehensive data
+  - **Better prediction accuracy**: Multi-year meta evolution insights
   - Complete match statistics with map-range aggregation
   - Map index tracking within match series
   - Multi-year meta evolution tracking
 - **Future**: Riot Games API integration (optional add-on)
+
+### Dataset Benefits
+
+**Combined Dataset Advantages**
+- **Increased Coverage**: 162,833 matches vs individual year averages
+- **Broader Player Base**: 3,944 unique players vs 2,894 (2024) or 2,591 (2025)
+- **More Team Diversity**: 636 unique teams vs 456 (2024) or 395 (2025)
+- **Extended Timeline**: 18+ months of data vs individual year limitations
+- **Cross-Year Analysis**: 1,542 players with data in both years
+- **Enhanced ML Training**: Larger, more diverse training dataset
+- **Better Predictions**: Historical performance patterns across years
+
+**Data Year Tracking**
+- API responses include `data_years` field showing distribution
+- Example: `"2024 (108 matches), 2025 (67 matches)"`
+- Helps users understand data recency and coverage
+- Enables cross-year performance analysis
 
 ## 🤖 ML Model
 
@@ -295,16 +320,6 @@ pipeline.load_scaler()
 features = pipeline.transform(player_stats, prop_request)
 ```
 
-## 🎨 UI/UX Features
-
-- **Glass-morphism Design**: Modern blurred background with glass effects
-- **Responsive Layout**: Works on desktop, tablet, and mobile
-- **Player Search**: Real-time autocomplete with 2,500+ players
-- **Map Range Selection**: Start Map and End Map dropdowns for PrizePicks-style props
-- **Visual Feedback**: Loading states, confidence indicators, color-coded results
-- **Professional Styling**: Clean, modern interface with proper typography
-- **Tournament Context**: Opponent team dropdown populated from dataset
-
 ## 🔧 Development
 
 ### Backend Development
@@ -335,7 +350,6 @@ docker-compose up db -d
 
 ## 🔐 Security
 
-- ✅ API keys removed from code
 - ✅ Environment variables for sensitive data
 - ✅ Comprehensive .gitignore
 - ✅ No hardcoded credentials
@@ -413,10 +427,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - **XGBoost** for superior gradient boosting performance
 - **Scikit-learn** for machine learning tools
 - **Tailwind CSS** for beautiful styling
-
-## 📞 Support
-
-For questions or support, please open an issue on GitHub or contact the development team.
 
 ---
 
