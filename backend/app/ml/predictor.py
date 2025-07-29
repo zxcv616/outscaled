@@ -478,12 +478,28 @@ class PropPredictor:
                               player_avg: float, sample_warning: str, reasoning: str) -> Optional[Dict]:
         """Handle extreme prop values with early returns"""
         try:
+            # Get map range for reasoning
+            map_range_info = ""
+            if hasattr(self, 'current_prop_request') and self.current_prop_request:
+                map_range = self.current_prop_request.get("map_range", [1])
+                if map_range and len(map_range) > 1:
+                    if map_range == [1, 2]:
+                        map_range_info = " Maps 1-2."
+                    elif map_range == [1, 2, 3]:
+                        map_range_info = " Maps 1-3."
+                    elif len(map_range) == 2:
+                        map_range_info = f" Maps {map_range[0]}-{map_range[1]}."
+                    else:
+                        map_range_info = f" Map range {map_range}."
+                elif map_range and len(map_range) == 1:
+                    map_range_info = f" Map {map_range[0]}."
+            
             # Impossible threshold check
             if prop_value > config['impossible_threshold']:
                 return {
                     "prediction": "LESS",
                     "confidence": 99.9,
-                    "reasoning": f"Prop value ({prop_value}) is unrealistically high for {prop_type}. This is virtually impossible.{sample_warning}",
+                    "reasoning": f"Prop value ({prop_value}) is unrealistically high for {prop_type}. This is virtually impossible.{sample_warning}{map_range_info}",
                     "features_used": self.feature_engineer.get_feature_names(),
                     "data_source": "extreme_value_check"
                 }
@@ -493,7 +509,7 @@ class PropPredictor:
                 return {
                     "prediction": "MORE",
                     "confidence": 99.9,
-                    "reasoning": f"Prop value ({prop_value}) is below minimum possible for {prop_type}. Player will definitely exceed this.{sample_warning}",
+                    "reasoning": f"Prop value ({prop_value}) is below minimum possible for {prop_type}. Player will definitely exceed this.{sample_warning}{map_range_info}",
                     "features_used": self.feature_engineer.get_feature_names(),
                     "data_source": "extreme_value_check"
                 }
@@ -503,7 +519,7 @@ class PropPredictor:
                 return {
                     "prediction": "MORE",
                     "confidence": 99.9,
-                    "reasoning": f"Prop value ({prop_value}) is zero for {prop_type}. Player cannot get negative {prop_type}, so they will definitely exceed this.{sample_warning}",
+                    "reasoning": f"Prop value ({prop_value}) is zero for {prop_type}. Player cannot get negative {prop_type}, so they will definitely exceed this.{sample_warning}{map_range_info}",
                     "features_used": self.feature_engineer.get_feature_names(),
                     "data_source": "extreme_value_check"
                 }
@@ -518,7 +534,7 @@ class PropPredictor:
                     return {
                         "prediction": "MORE",
                         "confidence": confidence,
-                        "reasoning": f"Prop value ({prop_value}) is significantly below player's average {prop_type} ({player_avg:.1f}). Player typically performs much better than this.{sample_warning}",
+                        "reasoning": f"Prop value ({prop_value}) is significantly below player's average {prop_type} ({player_avg:.1f}). Player typically performs much better than this.{sample_warning}{map_range_info}",
                         "features_used": self.feature_engineer.get_feature_names(),
                         "data_source": "statistical_check"
                     }
@@ -527,7 +543,7 @@ class PropPredictor:
                     return {
                         "prediction": "LESS",
                         "confidence": confidence,
-                        "reasoning": f"Prop value ({prop_value}) is significantly above player's average {prop_type} ({player_avg:.1f}). Player typically performs below this level.{sample_warning}",
+                        "reasoning": f"Prop value ({prop_value}) is significantly above player's average {prop_type} ({player_avg:.1f}). Player typically performs below this level.{sample_warning}{map_range_info}",
                         "features_used": self.feature_engineer.get_feature_names(),
                         "data_source": "statistical_check"
                     }
@@ -590,6 +606,9 @@ class PropPredictor:
         start_time = datetime.now()
         
         try:
+            # Store current prop_request for extreme value handler
+            self.current_prop_request = prop_request
+            
             # Input validation
             is_valid, validation_message = self._validate_inputs(player_stats, prop_request)
             if not is_valid:

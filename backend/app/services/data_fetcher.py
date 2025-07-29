@@ -3,9 +3,20 @@ import numpy as np
 from typing import Dict, List, Optional
 from datetime import datetime, timedelta
 import os
+import logging
+import re
 from app.core.config import settings
 from app.models.database import Player, PlayerMatch, Match
+from app.utils.data_utils import (
+    create_map_index_column, 
+    safe_division, 
+    validate_required_columns, 
+    extract_year_from_filename
+)
 from sqlalchemy.orm import Session
+
+# Set up logging
+logger = logging.getLogger(__name__)
 
 class DataFetcher:
     def __init__(self):
@@ -17,31 +28,52 @@ class DataFetcher:
         self.df = None
         self._load_data()
     
+    def _validate_csv_schema(self, df: pd.DataFrame, csv_path: str) -> bool:
+        """Validate that required columns exist in the CSV"""
+        required_columns = [
+            'kills', 'deaths', 'assists', 'total cs', 'earnedgold', 
+            'gamelength', 'teamkills', 'gameid', 'playername', 'teamname',
+            'result', 'date', 'datacompleteness'
+        ]
+        
+        is_valid, missing_columns = validate_required_columns(df, required_columns)
+        if not is_valid:
+            logger.error(f"Missing required columns in {csv_path}: {missing_columns}")
+            return False
+        
+        logger.info(f"Schema validation passed for {csv_path}")
+        return True
+    
     def _load_data(self):
         """Load and preprocess multiple Oracle's Elixir CSV datasets"""
         try:
-            print("Loading Oracle's Elixir datasets...")
+            logger.info("Loading Oracle's Elixir datasets...")
             all_dataframes = []
             
             for csv_path in self.csv_paths:
                 if os.path.exists(csv_path):
-                    print(f"Loading {csv_path}...")
+                    logger.info(f"Loading {csv_path}...")
                     df = pd.read_csv(csv_path, low_memory=False)
+                    
+                    # Validate schema before processing
+                    if not self._validate_csv_schema(df, csv_path):
+                        logger.warning(f"Skipping {csv_path} due to schema validation failure")
+                        continue
                     
                     # Filter for complete data only
                     df = df[df["datacompleteness"] == "complete"]
                     
-                    # Add year identifier for tracking
-                    year = "2025" if "2025" in csv_path else "2024"
+                    # Extract year using utility function
+                    year = extract_year_from_filename(csv_path)
                     df['data_year'] = year
                     
                     all_dataframes.append(df)
-                    print(f"Loaded {len(df)} complete matches from {year}")
+                    logger.info(f"Loaded {len(df)} complete matches from {year}")
                 else:
-                    print(f"Warning: {csv_path} not found, skipping...")
+                    logger.warning(f"Warning: {csv_path} not found, skipping...")
             
             if not all_dataframes:
-                print("No CSV files found, creating empty dataframe")
+                logger.warning("No CSV files found, creating empty dataframe")
                 self.df = pd.DataFrame()
                 return
             
@@ -57,34 +89,45 @@ class DataFetcher:
                 if col in self.df.columns:
                     self.df[col] = pd.to_numeric(self.df[col], errors='coerce')
             
-            # Add KDA column
-            self.df["kda"] = (self.df["kills"] + self.df["assists"]) / self.df["deaths"].replace(0, 1)
+            # Add KDA column with safe division
+            self.df["kda"] = safe_division(
+                self.df["kills"] + self.df["assists"], 
+                self.df["deaths"], 
+                default_value=1.0
+            )
             
             # Add GPM (Gold Per Minute) column - use earnedgold and gamelength
-            self.df["gpm"] = self.df["earnedgold"] / (self.df["gamelength"] / 60)
+            self.df["gpm"] = safe_division(
+                self.df["earnedgold"], 
+                self.df["gamelength"] / 60, 
+                default_value=0.0
+            )
             
-            # Add KP% (Kill Participation) column
-            self.df["kp_percent"] = (self.df["kills"] + self.df["assists"]) / self.df["teamkills"]
+            # Add KP% (Kill Participation) column with safe division
+            self.df["kp_percent"] = safe_division(
+                self.df["kills"] + self.df["assists"], 
+                self.df["teamkills"], 
+                default_value=0.0
+            )
             
-            # Add map index tracking for series
-            self.df['match_series'] = self.df['gameid'].str.split('_').str[0]
-            self.df['map_index_within_series'] = self.df.groupby('match_series')['gameid'].rank(method='dense').astype(int)
+            # Add map index tracking for series using utility function
+            self.df = create_map_index_column(self.df)
             
             # Sort by date for proper temporal ordering
             self.df = self.df.sort_values('date', ascending=False)
             
-            print(f"Combined dataset: {len(self.df)} total matches with {len(self.df['playername'].unique())} unique players")
-            print(f"Data years: {self.df['data_year'].value_counts().to_dict()}")
-            print(f"Map index distribution: {self.df['map_index_within_series'].value_counts().sort_index().to_dict()}")
+            logger.info(f"Combined dataset: {len(self.df)} total matches with {len(self.df['playername'].unique())} unique players")
+            logger.info(f"Data years: {self.df['data_year'].value_counts().to_dict()}")
+            logger.info(f"Map index distribution: {self.df['map_index_within_series'].value_counts().sort_index().to_dict()}")
             
         except Exception as e:
-            print(f"Error loading Oracle's Elixir data: {e}")
+            logger.error(f"Error loading Oracle's Elixir data: {e}")
             self.df = pd.DataFrame()
     
     def get_player_stats(self, player_name: str, db: Session, map_range: List[int] = [1, 2]) -> Dict:
         """Get comprehensive player statistics from Oracle's Elixir dataset with map-range support"""
         if self.df is None or self.df.empty:
-            print("No Oracle's Elixir data available")
+            logger.warning("No Oracle's Elixir data available")
             return self._get_minimal_stats(player_name)
         
         try:
@@ -92,19 +135,19 @@ class DataFetcher:
             player_matches = self.df[self.df["playername"].str.lower() == player_name.lower()]
             
             if player_matches.empty:
-                print(f"No data found for player: {player_name}")
+                logger.warning(f"No data found for player: {player_name}")
                 return self._get_minimal_stats(player_name)
             
-            print(f"Found {len(player_matches)} total matches for {player_name}")
+            logger.info(f"Found {len(player_matches)} total matches for {player_name}")
             
             # Filter for specific map range if provided
             if map_range and map_range != [1]:
                 player_matches_filtered = player_matches[player_matches['map_index_within_series'].isin(map_range)]
-                print(f"Filtered to {len(player_matches_filtered)} matches for map range {map_range}")
+                logger.info(f"Filtered to {len(player_matches_filtered)} matches for map range {map_range}")
                 
                 # If no matches in requested range, use all matches but warn
                 if player_matches_filtered.empty:
-                    print(f"No data found for player {player_name} in map range {map_range}. Using all available data.")
+                    logger.warning(f"No data found for player {player_name} in map range {map_range}. Using all available data.")
                     player_matches_filtered = player_matches
                     map_range_warning = f" (Note: No data available for maps {map_range}, using all matches)"
                 else:
@@ -115,38 +158,39 @@ class DataFetcher:
                 map_range_warning = ""
             
             if player_matches_filtered.empty:
-                print(f"No data found for player {player_name}")
+                logger.warning(f"No data found for player {player_name}")
                 return self._get_minimal_stats(player_name)
             
-            print(f"Using {len(player_matches_filtered)} matches for {player_name}")
+            logger.info(f"Using {len(player_matches_filtered)} matches for {player_name}")
             
             # Get recent matches (last 10)
             recent_matches = player_matches_filtered.sort_values("date", ascending=False).head(10)
             
-            # Calculate comprehensive statistics (map-range aware)
+            # Calculate comprehensive statistics (per-map averages only - no scaling here)
             maps_played = len(map_range) if map_range and map_range != [1] else 1
             
             # Get data year distribution for this player
             data_years = player_matches_filtered['data_year'].value_counts().to_dict()
             data_years_str = ", ".join([f"{year} ({count} matches)" for year, count in data_years.items()])
             
-            print(f"DEBUG: data_years calculation for {player_name}:")
-            print(f"  data_years dict: {data_years}")
-            print(f"  data_years_str: {data_years_str}")
+            logger.debug(f"data_years calculation for {player_name}:")
+            logger.debug(f"  data_years dict: {data_years}")
+            logger.debug(f"  data_years_str: {data_years_str}")
             
+            # Return per-map averages only - scaling will be handled in feature engineering
             stats = {
                 "player_name": player_name,
                 "recent_matches": self._format_recent_matches(recent_matches),
-                "avg_kills": player_matches_filtered["kills"].mean() * maps_played,  # Scale by maps
-                "avg_assists": player_matches_filtered["assists"].mean() * maps_played,
-                "avg_cs": player_matches_filtered["total cs"].mean() * maps_played,
-                "avg_deaths": player_matches_filtered["deaths"].mean() * maps_played,
-                "avg_gold": player_matches_filtered["earnedgold"].mean() * maps_played,
-                "avg_damage": player_matches_filtered["dpm"].mean() * maps_played if "dpm" in player_matches_filtered.columns else 0.0,
-                "avg_vision": player_matches_filtered.get("visionscore", pd.Series([0])).mean() * maps_played,
-                "recent_kills_avg": recent_matches["kills"].mean() * maps_played,
-                "recent_assists_avg": recent_matches["assists"].mean() * maps_played,
-                "recent_cs_avg": recent_matches["total cs"].mean() * maps_played,
+                "avg_kills": player_matches_filtered["kills"].mean(),  # Per-map average only
+                "avg_assists": player_matches_filtered["assists"].mean(),
+                "avg_cs": player_matches_filtered["total cs"].mean(),
+                "avg_deaths": player_matches_filtered["deaths"].mean(),
+                "avg_gold": player_matches_filtered["earnedgold"].mean(),
+                "avg_damage": player_matches_filtered.get("dpm", pd.Series([0.0])).mean(),
+                "avg_vision": player_matches_filtered.get("visionscore", pd.Series([0.0])).mean(),
+                "recent_kills_avg": recent_matches["kills"].mean(),
+                "recent_assists_avg": recent_matches["assists"].mean(),
+                "recent_cs_avg": recent_matches["total cs"].mean(),
                 "win_rate": (player_matches_filtered["result"] == 1).mean(),
                 "avg_kda": player_matches_filtered["kda"].mean(),
                 "avg_gpm": player_matches_filtered["gpm"].mean(),
@@ -154,7 +198,7 @@ class DataFetcher:
                 "data_source": "oracles_elixir",
                 "data_years": data_years_str,
                 "map_range": map_range,
-                "maps_played": maps_played,
+                "maps_played": maps_played,  # Include separately for feature engineering
                 "map_range_warning": map_range_warning,
                 "total_matches_available": len(player_matches),
                 "matches_in_range": len(player_matches_filtered)
@@ -168,7 +212,7 @@ class DataFetcher:
             return stats
             
         except Exception as e:
-            print(f"Error processing player data: {e}")
+            logger.error(f"Error processing player data: {e}")
             return self._get_minimal_stats(player_name)
     
     def _format_recent_matches(self, recent_matches: pd.DataFrame) -> List[Dict]:
@@ -219,7 +263,12 @@ class DataFetcher:
             "avg_gpm": 0.0,
             "avg_kp_percent": 0.0,
             "data_source": "none",
-            "data_years": "No data available"
+            "data_years": "No data available",
+            "maps_played": 1,
+            "map_range": [1],
+            "map_range_warning": "",
+            "total_matches_available": 0,
+            "matches_in_range": 0
         }
     
     def get_available_players(self) -> List[str]:
@@ -277,6 +326,6 @@ class DataFetcher:
             "avg_kills": team_matches["kills"].mean(),
             "avg_assists": team_matches["assists"].mean(),
             "avg_deaths": team_matches["deaths"].mean(),
-            "avg_gold": team_matches["gold"].mean(),
+            "avg_gold": team_matches["earnedgold"].mean(),  # Fixed: use earnedgold instead of gold
             "data_source": "oracles_elixir"
         } 
