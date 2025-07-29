@@ -1,8 +1,9 @@
 import pandas as pd
 import numpy as np
 import logging
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from sklearn.preprocessing import MinMaxScaler
+from sklearn.linear_model import LinearRegression
 import os
 import pickle
 
@@ -52,7 +53,7 @@ class FeaturePipeline:
             if self.is_fitted:
                 return self.scaler.transform(features.reshape(1, -1)).flatten()
             else:
-                logger.warning("Scaler not fitted, returning unscaled features")
+                logger.debug("Scaler not fitted, returning unscaled features")
                 return features
                 
         except Exception as e:
@@ -93,7 +94,6 @@ class FeaturePipeline:
         return self.feature_engineer.get_feature_names()
 
 
-# Legacy FeatureEngineer class for backward compatibility
 class FeatureEngineer:
     def __init__(self):
         # Extract constants to class variables
@@ -129,12 +129,9 @@ class FeatureEngineer:
             'early_game_impact', 'mid_game_transition', 'objective_control',
             'champion_performance_variance', 'role_specific_performance'
         ]
-        
-        # Initialize scaler for optional feature scaling
-        self.scaler = MinMaxScaler()
-        self.is_scaler_fitted = False
     
-    def engineer_features(self, player_stats: Dict, prop_request: Dict) -> np.ndarray:
+    def engineer_features(self, player_stats: Dict, prop_request: Dict, 
+                         include_prop_value: bool = False) -> np.ndarray:
         """Engineer features from player statistics and prop request with improved map-range support"""
         try:
             # IMPROVED: Input validation for core stats
@@ -145,86 +142,95 @@ class FeatureEngineer:
                 logger.warning(f"Too many missing core stats: {missing_core_stats}. Using fallback features.")
                 return self._create_minimal_features(prop_request)
             
-            features = []
+            # Extract base features (14 features)
+            base_features = self._extract_base_features(player_stats, prop_request)
             
-            # Get map range from prop request
-            map_range = prop_request.get('map_range', [1])
-            maps_played = len(map_range)
+            # Extract derived features (17 features)
+            derived_features = self._extract_derived_features(player_stats, prop_request)
             
-            # IMPROVED: Calculate normalized averages instead of simple multiplication
-            # This avoids scale drift and provides more realistic feature values
-            normalization_factor = max(maps_played, 1)  # Avoid division by zero
+            # Combine features
+            features = base_features + derived_features
             
-            # Basic player statistics (14 features) - now properly normalized
-            features.extend([
-                player_stats.get('avg_kills', 0.0) / normalization_factor,  # Normalized average
-                player_stats.get('avg_assists', 0.0) / normalization_factor,
-                player_stats.get('avg_cs', 0.0) / normalization_factor,
-                player_stats.get('avg_deaths', 0.0) / normalization_factor,
-                player_stats.get('avg_gold', 0.0) / normalization_factor,
-                player_stats.get('avg_damage', 0.0) / normalization_factor,
-                player_stats.get('avg_vision', 0.0) / normalization_factor,
-                player_stats.get('recent_kills_avg', 0.0) / normalization_factor,
-                player_stats.get('recent_assists_avg', 0.0) / normalization_factor,
-                player_stats.get('recent_cs_avg', 0.0) / normalization_factor,
-                player_stats.get('win_rate', 0.0),  # Win rate doesn't need normalization
-                player_stats.get('avg_kda', 0.0),   # KDA doesn't need normalization
-                player_stats.get('avg_gpm', 0.0),   # GPM doesn't need normalization
-                player_stats.get('avg_kp_percent', 0.0)  # KP% doesn't need normalization
-            ])
-            
-            # Derived features (17 features) - enhanced with new features (prop_value removed for training)
-            features.extend([
-                self._calculate_consistency_score(player_stats),
-                self._calculate_recent_form_trend(player_stats),
-                self._calculate_dynamic_data_quality(player_stats),  # IMPROVED: Dynamic quality
-                # prop_value removed from training features to prevent data leakage
-                maps_played,  # Use maps_played instead of map_number
-                self._calculate_opponent_strength(prop_request),
-                self._calculate_tournament_tier(prop_request),
-                self._calculate_position_factor(player_stats),
-                self._calculate_champion_pool_size(player_stats),
-                self._calculate_team_synergy(player_stats),
-                self._calculate_meta_adaptation(player_stats),
-                self._calculate_pressure_handling(player_stats, prop_request),  # IMPROVED: Context-aware
-                self._calculate_late_game_performance(player_stats),
-                self._calculate_early_game_impact(player_stats),
-                self._calculate_mid_game_transition(player_stats),
-                self._calculate_objective_control(player_stats),  # FIXED: Added missing feature
-                self._calculate_champion_performance_variance(player_stats),  # NEW: Champion variance
-                self._calculate_role_specific_performance(player_stats) # NEW: Role-specific performance
-            ])
-            
-            # Ensure exactly 31 features (prop_value removed from training)
-            if len(features) != 31:
-                logger.warning(f"Expected 31 features, got {len(features)}. Padding or truncating.")
-                if len(features) < 31:
-                    features.extend([0.0] * (31 - len(features)))
+            # IMPROVED: Dynamic feature validation
+            expected_features = len(self.feature_names)
+            if len(features) != expected_features:
+                logger.debug(f"Expected {expected_features} features, got {len(features)}. Padding or truncating.")
+                if len(features) < expected_features:
+                    features.extend([0.0] * (expected_features - len(features)))
                 else:
-                    features = features[:31]
+                    features = features[:expected_features]
             
-            return np.array(features, dtype=np.float32)
+            # Optional: Add prop_value for inference-only use cases
+            if include_prop_value:
+                prop_value = prop_request.get('prop_value', 0.0)
+                features.append(prop_value)
+            
+            feature_array = np.array(features, dtype=np.float32)
+            logger.debug(f"Engineered {len(feature_array)} features")
+            
+            return feature_array
             
         except Exception as e:
             logger.error(f"Error engineering features: {e}")
             return self._create_minimal_features(prop_request)
     
-    def fit_scaler(self, training_data: List[np.ndarray]) -> None:
-        """Fit the scaler on training data for consistent scaling"""
-        try:
-            if training_data:
-                X = np.array(training_data)
-                self.scaler.fit(X)
-                self.is_scaler_fitted = True
-                logger.info("Feature scaler fitted successfully")
-        except Exception as e:
-            logger.error(f"Error fitting scaler: {e}")
+    def _extract_base_features(self, player_stats: Dict, prop_request: Dict) -> List[float]:
+        """Extract base player statistics (14 features)"""
+        # Get map range from prop request
+        map_range = prop_request.get('map_range', [1])
+        maps_played = len(map_range)
+        
+        # IMPROVED: Calculate normalized averages instead of simple multiplication
+        normalization_factor = max(maps_played, 1)  # Avoid division by zero
+        
+        # Basic player statistics (14 features) - now properly normalized
+        base_features = [
+            player_stats.get('avg_kills', 0.0) / normalization_factor,  # Normalized average
+            player_stats.get('avg_assists', 0.0) / normalization_factor,
+            player_stats.get('avg_cs', 0.0) / normalization_factor,
+            player_stats.get('avg_deaths', 0.0) / normalization_factor,
+            player_stats.get('avg_gold', 0.0) / normalization_factor,
+            player_stats.get('avg_damage', 0.0) / normalization_factor,
+            player_stats.get('avg_vision', 0.0) / normalization_factor,
+            player_stats.get('recent_kills_avg', 0.0) / normalization_factor,
+            player_stats.get('recent_assists_avg', 0.0) / normalization_factor,
+            player_stats.get('recent_cs_avg', 0.0) / normalization_factor,
+            player_stats.get('win_rate', 0.0),  # Win rate doesn't need normalization
+            player_stats.get('avg_kda', 0.0),   # KDA doesn't need normalization
+            player_stats.get('avg_gpm', 0.0),   # GPM doesn't need normalization
+            player_stats.get('avg_kp_percent', 0.0)  # KP% doesn't need normalization
+        ]
+        
+        return base_features
     
-    def scale_features(self, features: np.ndarray) -> np.ndarray:
-        """Scale features if scaler is fitted"""
-        if self.is_scaler_fitted:
-            return self.scaler.transform(features.reshape(1, -1)).flatten()
-        return features
+    def _extract_derived_features(self, player_stats: Dict, prop_request: Dict) -> List[float]:
+        """Extract derived features (17 features)"""
+        derived_features = [
+            self._calculate_consistency_score(player_stats),
+            self._calculate_recent_form_trend(player_stats),
+            self._calculate_dynamic_data_quality(player_stats),  # IMPROVED: Dynamic quality
+            # prop_value removed from training features to prevent data leakage
+            len(prop_request.get('map_range', [1])),  # Use maps_played instead of map_number
+            self._calculate_opponent_strength(prop_request),
+            self._calculate_tournament_tier(prop_request),
+            self._calculate_position_factor(player_stats),
+            self._calculate_champion_pool_size(player_stats),
+            self._calculate_team_synergy(player_stats),
+            self._calculate_meta_adaptation(player_stats),
+            self._calculate_pressure_handling(player_stats, prop_request),  # IMPROVED: Context-aware
+            self._calculate_late_game_performance(player_stats),
+            self._calculate_early_game_impact(player_stats),
+            self._calculate_mid_game_transition(player_stats),
+            self._calculate_objective_control(player_stats),  # FIXED: Added missing feature
+            self._calculate_champion_performance_variance(player_stats),  # NEW: Champion variance
+            self._calculate_role_specific_performance(player_stats) # NEW: Role-specific performance
+        ]
+        
+        return derived_features
+    
+    def _normalize_score(self, value: float, expected_max: float) -> float:
+        """Helper function to normalize scores to [0, 1] range"""
+        return min(max(value / expected_max, 0.0), 1.0)
     
     def _calculate_consistency_score(self, player_stats: Dict) -> float:
         """Calculate consistency score based on standard deviation of recent performance"""
@@ -248,23 +254,33 @@ class FeatureEngineer:
             return 0.5
     
     def _calculate_recent_form_trend(self, player_stats: Dict) -> float:
-        """Calculate recent form trend (positive = improving, negative = declining)"""
+        """Calculate recent form trend using linear regression (IMPROVED)"""
         recent_matches = player_stats.get('recent_matches', [])
         if not recent_matches or len(recent_matches) < 5:
             return 0.0
         
         try:
-            # Split into two halves and compare
-            first_half = recent_matches[:len(recent_matches)//2]
-            second_half = recent_matches[len(recent_matches)//2:]
+            # Extract kills data for trend analysis
+            kills_data = [m.get('kills', 0) for m in recent_matches if m is not None]
+            if len(kills_data) < 3:
+                return 0.0
             
-            first_avg = np.mean([m.get('kills', 0) for m in first_half if m is not None]) if first_half else 0.0
-            second_avg = np.mean([m.get('kills', 0) for m in second_half if m is not None]) if second_half else 0.0
+            # Use linear regression for more robust trend calculation
+            y = np.array(kills_data).reshape(-1, 1)
+            x = np.arange(len(y)).reshape(-1, 1)
             
-            # Normalize trend to [-1, 1] range
-            if first_avg > 0:
-                trend = (second_avg - first_avg) / first_avg
-                return np.clip(trend, -1.0, 1.0)
+            # Fit linear regression
+            reg = LinearRegression()
+            reg.fit(x, y)
+            slope = reg.coef_[0][0]
+            
+            # Normalize slope to [-1, 1] range based on data variance
+            if len(kills_data) > 1:
+                data_std = np.std(kills_data)
+                if data_std > 0:
+                    normalized_slope = slope / data_std
+                    return np.clip(normalized_slope, -1.0, 1.0)
+            
             return 0.0
         except Exception as e:
             logger.warning(f"Error calculating form trend: {e}")
@@ -332,8 +348,8 @@ class FeatureEngineer:
     
     def _calculate_position_factor(self, player_stats: Dict) -> float:
         """Calculate position-specific factor with role-appropriate features"""
-        # Try to infer position from player stats or use default
-        position = player_stats.get('position', 'mid').lower()  # Default to mid
+        # IMPROVED: Safe position extraction with fallback
+        position = str(player_stats.get('position', 'mid')).lower()
         
         # Position-specific factors based on role importance for different stats
         position_factors = {
@@ -348,7 +364,7 @@ class FeatureEngineer:
     
     def _calculate_role_specific_performance(self, player_stats: Dict) -> float:
         """Calculate role-specific performance metrics"""
-        position = player_stats.get('position', 'mid').lower()
+        position = str(player_stats.get('position', 'mid')).lower()
         recent_matches = player_stats.get('recent_matches', [])
         
         if not recent_matches:
@@ -364,8 +380,8 @@ class FeatureEngineer:
                 avg_damage = np.mean(damage_scores) if damage_scores else 0
                 
                 # ADC performance: CS and damage focused
-                cs_score = min(avg_cs / 300.0, 1.0)  # Normalize to 300 CS
-                damage_score = min(avg_damage / 20000.0, 1.0)  # Normalize to 20k damage
+                cs_score = self._normalize_score(avg_cs, 300.0)  # Normalize to 300 CS
+                damage_score = self._normalize_score(avg_damage, 20000.0)  # Normalize to 20k damage
                 
                 return (cs_score * 0.6) + (damage_score * 0.4)
                 
@@ -380,8 +396,8 @@ class FeatureEngineer:
                 avg_deaths = np.mean(death_scores) if death_scores else 0
                 
                 # Support performance: Assists and vision focused, low deaths
-                assist_score = min(avg_assists / 15.0, 1.0)  # Normalize to 15 assists
-                vision_score = min(avg_vision / 50.0, 1.0)   # Normalize to 50 vision
+                assist_score = self._normalize_score(avg_assists, 15.0)  # Normalize to 15 assists
+                vision_score = self._normalize_score(avg_vision, 50.0)   # Normalize to 50 vision
                 death_score = max(0, 1.0 - (avg_deaths / 5.0))  # Lower deaths = better
                 
                 return (assist_score * 0.5) + (vision_score * 0.3) + (death_score * 0.2)
@@ -395,8 +411,8 @@ class FeatureEngineer:
                 avg_damage = np.mean(damage_scores) if damage_scores else 0
                 
                 # Mid performance: KDA and damage focused
-                kda_score = min(avg_kda / 5.0, 1.0)  # Normalize to 5.0 KDA
-                damage_score = min(avg_damage / 25000.0, 1.0)  # Normalize to 25k damage
+                kda_score = self._normalize_score(avg_kda, 5.0)  # Normalize to 5.0 KDA
+                damage_score = self._normalize_score(avg_damage, 25000.0)  # Normalize to 25k damage
                 
                 return (kda_score * 0.6) + (damage_score * 0.4)
                 
@@ -409,8 +425,8 @@ class FeatureEngineer:
                 avg_vision = np.mean(vision_scores) if vision_scores else 0
                 
                 # Jungle performance: Assists and vision focused
-                assist_score = min(avg_assists / 12.0, 1.0)  # Normalize to 12 assists
-                vision_score = min(avg_vision / 40.0, 1.0)   # Normalize to 40 vision
+                assist_score = self._normalize_score(avg_assists, 12.0)  # Normalize to 12 assists
+                vision_score = self._normalize_score(avg_vision, 40.0)   # Normalize to 40 vision
                 
                 return (assist_score * 0.7) + (vision_score * 0.3)
                 
@@ -423,8 +439,8 @@ class FeatureEngineer:
                 avg_kda = np.mean(kda_scores) if kda_scores else 0
                 
                 # Top performance: CS and KDA focused
-                cs_score = min(avg_cs / 250.0, 1.0)  # Normalize to 250 CS
-                kda_score = min(avg_kda / 4.0, 1.0)  # Normalize to 4.0 KDA
+                cs_score = self._normalize_score(avg_cs, 250.0)  # Normalize to 250 CS
+                kda_score = self._normalize_score(avg_kda, 4.0)  # Normalize to 4.0 KDA
                 
                 return (cs_score * 0.6) + (kda_score * 0.4)
                 
@@ -551,25 +567,25 @@ class FeatureEngineer:
         """Calculate late game performance (simplified proxy)"""
         # Use KDA as a proxy for late game performance
         avg_kda = player_stats.get('avg_kda', 2.0)
-        return min(avg_kda / 5.0, 1.0)  # Normalize to [0, 1]
+        return self._normalize_score(avg_kda, 5.0)  # Normalize to [0, 1]
     
     def _calculate_early_game_impact(self, player_stats: Dict) -> float:
         """Calculate early game impact (simplified proxy)"""
         # Use CS as a proxy for early game impact
         avg_cs = player_stats.get('avg_cs', 200.0)
-        return min(avg_cs / 300.0, 1.0)  # Normalize to [0, 1]
+        return self._normalize_score(avg_cs, 300.0)  # Normalize to [0, 1]
     
     def _calculate_mid_game_transition(self, player_stats: Dict) -> float:
         """Calculate mid game transition effectiveness"""
         # Use assists as a proxy for mid game transition
         avg_assists = player_stats.get('avg_assists', 5.0)
-        return min(avg_assists / 10.0, 1.0)  # Normalize to [0, 1]
+        return self._normalize_score(avg_assists, 10.0)  # Normalize to [0, 1]
     
     def _calculate_objective_control(self, player_stats: Dict) -> float:
         """Calculate objective control (simplified proxy)"""
         # Use vision score as a proxy for objective control
         avg_vision = player_stats.get('avg_vision', 25.0)
-        return min(avg_vision / 50.0, 1.0)  # Normalize to [0, 1]
+        return self._normalize_score(avg_vision, 50.0)  # Normalize to [0, 1]
     
     def _calculate_champion_performance_variance(self, player_stats: Dict) -> float:
         """Calculate champion performance variance"""
@@ -669,8 +685,7 @@ class FeatureEngineer:
             'consistency_score': 'Performance consistency score',
             'recent_form_trend': 'Recent form trend (improving/declining)',
             'data_source_quality': 'Quality score of data source',
-            'prop_value': 'Target prop value',
-            'map_number': 'Map number in series',
+            'maps_played': 'Number of maps in the prediction range',
             'opponent_strength': 'Opponent team strength',
             'tournament_tier': 'Tournament tier importance',
             'position_factor': 'Position-specific factor',

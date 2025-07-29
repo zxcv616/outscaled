@@ -171,7 +171,7 @@ function App() {
           {/* Header */}
           <div className="text-center mb-12">
             <h1 className="text-5xl font-bold text-white mb-4 drop-shadow-lg">
-              Outscaled.gg
+              Outscaled.GG
             </h1>
             <p className="text-xl text-gray-200 drop-shadow-md">
               League of Legends Prop Predictions
@@ -193,7 +193,7 @@ function App() {
                     Make a Prediction
                   </h2>
                   <p className="text-gray-600">
-                    Select a player and enter prop details to get AI-powered predictions
+                    Select a player and enter prop details to get predictions
                   </p>
                 </div>
 
