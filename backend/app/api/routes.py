@@ -223,7 +223,8 @@ def get_player_stats(player_name: str, db: Session = Depends(get_db)):
             avg_cs=player_stats["avg_cs"],
             avg_deaths=player_stats["avg_deaths"],
             win_rate=player_stats["win_rate"],
-            data_source=player_stats["data_source"]
+            data_source=player_stats["data_source"],
+            data_years=player_stats.get("data_years", "No data available")
         )
         
     except Exception as e:
@@ -243,6 +244,7 @@ def get_feature_importance():
     """Get feature importance scores"""
     try:
         predictor = PropPredictor()
-        return predictor.get_feature_importance()
+        feature_importance = predictor.get_feature_importance()
+        return {"feature_importance": feature_importance}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error getting feature importance: {str(e)}") 

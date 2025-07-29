@@ -21,7 +21,14 @@ class PredictionResponse(BaseModel):
 
 class PlayerStatsResponse(BaseModel):
     player_name: str
-    stats: Dict[str, Any]
+    recent_matches: List[Dict[str, Any]]
+    avg_kills: float
+    avg_assists: float
+    avg_cs: float
+    avg_deaths: float
+    win_rate: float
+    data_source: str
+    data_years: Optional[str] = "No data available"
 
 class ErrorResponse(BaseModel):
     detail: str 

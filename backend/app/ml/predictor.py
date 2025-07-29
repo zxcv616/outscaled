@@ -781,6 +781,20 @@ class PropPredictor:
             elif win_rate < 0.3:
                 reasoning_parts.append("struggling win rate")
             
+            # 9. Map range context (PrizePicks style)
+            map_range = prop_request.get("map_range", [1])
+            if map_range and len(map_range) > 1:
+                if map_range == [1, 2]:
+                    reasoning_parts.append("Maps 1-2")
+                elif map_range == [1, 2, 3]:
+                    reasoning_parts.append("Maps 1-3")
+                elif len(map_range) == 2:
+                    reasoning_parts.append(f"Maps {map_range[0]}-{map_range[1]}")
+                else:
+                    reasoning_parts.append(f"Map range {map_range}")
+            elif map_range and len(map_range) == 1:
+                reasoning_parts.append(f"Map {map_range[0]}")
+            
             # Combine reasoning parts
             base_reasoning = ". ".join(reasoning_parts) + "."
             

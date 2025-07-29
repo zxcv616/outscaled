@@ -9,18 +9,47 @@ from sqlalchemy.orm import Session
 
 class DataFetcher:
     def __init__(self):
-        self.csv_path = "2025_LoL_esports_match_data_from_OraclesElixir.csv"
+        # Support multiple CSV files for comprehensive data coverage
+        self.csv_paths = [
+            "2025_LoL_esports_match_data_from_OraclesElixir.csv",
+            "2024_LoL_esports_match_data_from_OraclesElixir.csv"
+        ]
         self.df = None
         self._load_data()
     
     def _load_data(self):
-        """Load and preprocess the Oracle's Elixir CSV data"""
+        """Load and preprocess multiple Oracle's Elixir CSV datasets"""
         try:
-            print(f"Loading Oracle's Elixir data from {self.csv_path}...")
-            self.df = pd.read_csv(self.csv_path, low_memory=False)
+            print("Loading Oracle's Elixir datasets...")
+            all_dataframes = []
             
-            # Filter for complete data only
-            self.df = self.df[self.df["datacompleteness"] == "complete"]
+            for csv_path in self.csv_paths:
+                if os.path.exists(csv_path):
+                    print(f"Loading {csv_path}...")
+                    df = pd.read_csv(csv_path, low_memory=False)
+                    
+                    # Filter for complete data only
+                    df = df[df["datacompleteness"] == "complete"]
+                    
+                    # Add year identifier for tracking
+                    year = "2025" if "2025" in csv_path else "2024"
+                    df['data_year'] = year
+                    
+                    all_dataframes.append(df)
+                    print(f"Loaded {len(df)} complete matches from {year}")
+                else:
+                    print(f"Warning: {csv_path} not found, skipping...")
+            
+            if not all_dataframes:
+                print("No CSV files found, creating empty dataframe")
+                self.df = pd.DataFrame()
+                return
+            
+            # Combine all dataframes
+            self.df = pd.concat(all_dataframes, ignore_index=True)
+            
+            # Remove duplicates based on gameid and playername (same player in same game)
+            self.df = self.df.drop_duplicates(subset=['gameid', 'playername'], keep='first')
             
             # Convert column types - use correct column names
             numeric_columns = ["kills", "deaths", "assists", "dpm", "earnedgoldshare", "total cs", "earnedgold"]
@@ -41,7 +70,11 @@ class DataFetcher:
             self.df['match_series'] = self.df['gameid'].str.split('_').str[0]
             self.df['map_index_within_series'] = self.df.groupby('match_series')['gameid'].rank(method='dense').astype(int)
             
-            print(f"Loaded {len(self.df)} complete matches with {len(self.df['playername'].unique())} unique players")
+            # Sort by date for proper temporal ordering
+            self.df = self.df.sort_values('date', ascending=False)
+            
+            print(f"Combined dataset: {len(self.df)} total matches with {len(self.df['playername'].unique())} unique players")
+            print(f"Data years: {self.df['data_year'].value_counts().to_dict()}")
             print(f"Map index distribution: {self.df['map_index_within_series'].value_counts().sort_index().to_dict()}")
             
         except Exception as e:
@@ -93,6 +126,14 @@ class DataFetcher:
             # Calculate comprehensive statistics (map-range aware)
             maps_played = len(map_range) if map_range and map_range != [1] else 1
             
+            # Get data year distribution for this player
+            data_years = player_matches_filtered['data_year'].value_counts().to_dict()
+            data_years_str = ", ".join([f"{year} ({count} matches)" for year, count in data_years.items()])
+            
+            print(f"DEBUG: data_years calculation for {player_name}:")
+            print(f"  data_years dict: {data_years}")
+            print(f"  data_years_str: {data_years_str}")
+            
             stats = {
                 "player_name": player_name,
                 "recent_matches": self._format_recent_matches(recent_matches),
@@ -111,6 +152,7 @@ class DataFetcher:
                 "avg_gpm": player_matches_filtered["gpm"].mean(),
                 "avg_kp_percent": player_matches_filtered["kp_percent"].mean(),
                 "data_source": "oracles_elixir",
+                "data_years": data_years_str,
                 "map_range": map_range,
                 "maps_played": maps_played,
                 "map_range_warning": map_range_warning,
@@ -151,7 +193,8 @@ class DataFetcher:
                 "match_date": str(match.get("date", "")),
                 "team_name": str(match.get("teamname", "")),
                 "opponent": str(match.get("opponent", "")),
-                "league": str(match.get("league", ""))
+                "league": str(match.get("league", "")),
+                "data_year": str(match.get("data_year", ""))
             }
             matches.append(match_data)
         return matches
@@ -175,7 +218,8 @@ class DataFetcher:
             "avg_kda": 0.0,
             "avg_gpm": 0.0,
             "avg_kp_percent": 0.0,
-            "data_source": "none"
+            "data_source": "none",
+            "data_years": "No data available"
         }
     
     def get_available_players(self) -> List[str]:

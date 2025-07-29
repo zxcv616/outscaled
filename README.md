@@ -1,13 +1,13 @@
 # Outscaled.gg - AI-Powered League of Legends Prop Predictor
 
-A sophisticated machine learning platform that predicts League of Legends player prop bets using professional match data and advanced statistical analysis. Built specifically for PrizePicks-style map-range props (e.g., "Maps 1-2 Kills: 6.5").
+Machine learning platform that predicts League of Legends player props using professional match data and statistical analysis. 
 
 ## ✨ Features
 
 - **🔍 Smart Player Search**: Autocomplete search with 2,500+ professional players from Oracle's Elixir dataset
 - **🤖 ML Predictions**: AI-powered OVER/UNDER predictions for kills, assists, CS, deaths, gold, and damage
 - **📊 Advanced Analytics**: Statistical reasoning with trend analysis, volatility, z-scores, and performance differentials
-- **🎯 Real Data**: Powered by Oracle's Elixir professional match dataset (76,704 matches, 2,592 players)
+- **🎯 Real Data**: Powered by Oracle's Elixir professional match dataset (177,660 matches, 3,945 players from 2024-2025)
 - **🎨 Beautiful UI**: Glass-morphism design with blurred background and professional interface
 - **⚡ Extreme Value Handling**: Smart detection of unrealistic prop values with logical responses
 - **📈 Comprehensive Testing**: Full test suite covering all API endpoints and edge cases
@@ -137,12 +137,13 @@ pytest tests/test_api.py -v
 
 ## 📊 Data Sources
 
-- **Primary**: Oracle's Elixir professional match dataset
-  - 76,704 matches analyzed
-  - 2,592 professional players
-  - Multiple leagues (LCS, LEC, LCK, LPL, etc.)
+- **Primary**: Oracle's Elixir professional match dataset (2024-2025)
+  - 177,660 matches analyzed (100,956 from 2024, 76,704 from 2025)
+  - 3,945 professional players (1,542 players in both years)
+  - 636 unique teams across multiple leagues
   - Complete match statistics with map-range aggregation
   - Map index tracking within match series
+  - Multi-year meta evolution tracking
 - **Future**: Riot Games API integration (optional add-on)
 
 ## 🤖 ML Model
