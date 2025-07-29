@@ -1,4 +1,4 @@
-# Outscaled.gg - AI-Powered League of Legends Prop Predictor
+# Outscaled.GG
 
 Machine learning platform that predicts League of Legends player props using professional match data and statistical analysis. 
 
