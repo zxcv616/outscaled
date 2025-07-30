@@ -2,21 +2,21 @@
 
 Machine learning platform that predicts League of Legends player props using professional match data and statistical analysis. 
 
-## ✨ Features
+## Features
 
-- **🔍 Smart Player Search**: Autocomplete search with 3,944+ professional players from Oracle's Elixir dataset
-- **🤖 ML Predictions**: AI-powered OVER/UNDER predictions for kills, assists, CS, deaths, gold, and damage
-- **📊 Advanced Analytics**: Statistical reasoning with trend analysis, volatility, z-scores, and performance differentials
-- **🎯 Multi-Year Data**: Powered by Oracle's Elixir professional match dataset (162,833 matches, 3,944 players from 2024-2025)
-- **📅 Data Year Tracking**: API responses include data year distribution (e.g., "2024 (108 matches), 2025 (67 matches)")
-- **🎨 Beautiful UI**: Glass-morphism design with blurred background and professional interface
-- **⚡ Extreme Value Handling**: Smart detection of unrealistic prop values with logical responses
-- **📈 Comprehensive Testing**: Full test suite covering all API endpoints and edge cases
-- **🗺️ Map-Range Support**: Handles PrizePicks-style props across multiple maps (Maps 1-2, Maps 1-3, etc.)
-- **🎮 Role-Specific Analysis**: Position-aware feature engineering (ADC, Support, Mid, Jungle, Top)
-- **🏆 Tournament Context**: Pressure-aware predictions based on tournament tier and opponent strength
+- **Smart Player Search**: Autocomplete search with 3,944+ professional players from Oracle's Elixir dataset
+- **ML Predictions**: AI-powered OVER/UNDER predictions for kills, assists, CS, deaths, gold, and damage
+- **Advanced Analytics**: Statistical reasoning with trend analysis, volatility, z-scores, and performance differentials
+- **Multi-Year Data**: Powered by Oracle's Elixir professional match dataset (162,833 matches, 3,944 players from 2024-2025)
+- **Data Year Tracking**: API responses include data year distribution (e.g., "2024 (108 matches), 2025 (67 matches)")
+- **Beautiful UI**: Glass-morphism design with blurred background and professional interface
+- **Extreme Value Handling**: Smart detection of unrealistic prop values with logical responses
+- **Comprehensive Testing**: Full test suite covering all API endpoints and edge cases
+- **Map-Range Support**: Handles PrizePicks-style props across multiple maps (Maps 1-2, Maps 1-3, etc.)
+- **Role-Specific Analysis**: Position-aware feature engineering (ADC, Support, Mid, Jungle, Top)
+- **Tournament Context**: Pressure-aware predictions based on tournament tier and opponent strength
 
-## 🛠️ Tech Stack
+## Tech Stack
 
 - **Backend**: FastAPI, Python 3.8+, PostgreSQL, SQLAlchemy
 - **ML**: XGBoost (primary), RandomForest (fallback), Scikit-learn, 31 engineered features
@@ -25,7 +25,7 @@ Machine learning platform that predicts League of Legends player props using pro
 - **Deployment**: Docker, Docker Compose
 - **Testing**: Pytest, comprehensive API test suite
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
 
@@ -58,7 +58,7 @@ Machine learning platform that predicts League of Legends player props using pro
    - API Docs: http://localhost:8000/docs
    - Demo: http://localhost:3000/demo.html
 
-## 📋 API Endpoints
+## API Endpoints
 
 ### Core Endpoints
 
@@ -107,7 +107,7 @@ Machine learning platform that predicts League of Legends player props using pro
 }
 ```
 
-## 🧪 Testing
+## Testing
 
 ### Run API Tests
 
@@ -124,21 +124,21 @@ pytest tests/test_api.py -v
 
 ### Test Coverage
 
-- ✅ Health check endpoint
-- ✅ Player search functionality
-- ✅ Player validation
-- ✅ Basic prediction functionality
-- ✅ Extreme value handling (1000+ kills, negative values)
-- ✅ Invalid player handling
-- ✅ Statistical reasoning analysis
-- ✅ Different prop types (kills, assists, cs, deaths, gold, damage)
-- ✅ Map-range support (Maps 1-2, Maps 1-3, etc.)
-- ✅ Model information endpoints
-- ✅ Feature importance analysis
-- ✅ Deterministic predictions (same inputs = same outputs)
-- ✅ Data year tracking in API responses
+- Health check endpoint
+- Player search functionality
+- Player validation
+- Basic prediction functionality
+- Extreme value handling (1000+ kills, negative values)
+- Invalid player handling
+- Statistical reasoning analysis
+- Different prop types (kills, assists, cs, deaths, gold, damage)
+- Map-range support (Maps 1-2, Maps 1-3, etc.)
+- Model information endpoints
+- Feature importance analysis
+- Deterministic predictions (same inputs = same outputs)
+- Data year tracking in API responses
 
-## 📊 Data Sources
+## Data Sources
 
 - **Primary**: Oracle's Elixir professional match dataset (2024-2025)
   - **162,833 total matches** (92,543 from 2024, 70,290 from 2025)
@@ -171,7 +171,7 @@ pytest tests/test_api.py -v
 - Helps users understand data recency and coverage
 - Enables cross-year performance analysis
 
-## 🤖 ML Model
+## ML Model
 
 ### Model Architecture
 
@@ -320,7 +320,7 @@ pipeline.load_scaler()
 features = pipeline.transform(player_stats, prop_request)
 ```
 
-## 🔧 Development
+## Development
 
 ### Backend Development
 
@@ -348,17 +348,17 @@ docker-compose up db -d
 # Currently using SQLAlchemy with auto-creation
 ```
 
-## 🔐 Security
+## Security
 
-- ✅ Environment variables for sensitive data
-- ✅ Comprehensive .gitignore
-- ✅ No hardcoded credentials
-- ✅ Input validation and sanitization
-- ✅ CORS configuration
-- ✅ Error handling and logging
-- ✅ Deterministic predictions (no random variance)
+- Environment variables for sensitive data
+- Comprehensive .gitignore
+- No hardcoded credentials
+- Input validation and sanitization
+- CORS configuration
+- Error handling and logging
+- Deterministic predictions (no random variance)
 
-## 🌍 Environment Variables
+## Environment Variables
 
 Create a `.env` file based on `env.example`:
 
@@ -379,7 +379,7 @@ BACKEND_CORS_ORIGINS=["http://localhost:3000", "http://localhost:8000"]
 DEBUG=False
 ```
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 outscaled/
@@ -407,7 +407,7 @@ outscaled/
 └── README.md
 ```
 
-## 🤝 Contributing
+## Contributing
 
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/amazing-feature`)
@@ -415,11 +415,11 @@ outscaled/
 4. Push to the branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
 
-## 📄 License
+## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
 - **Oracle's Elixir** for comprehensive professional match data
 - **Riot Games** for League of Legends API
