@@ -1,16 +1,21 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
-from typing import List, Dict
+from typing import List, Optional
 from app.models.database import get_db
-from app.schemas.pydantic_models import PropRequest, PredictionResponse, PlayerStatsResponse
+from app.schemas.pydantic_models import PropRequest, PlayerStatsResponse
 from app.services.data_fetcher import DataFetcher
 from app.ml.predictor import PropPredictor
+import logging
 
-router = APIRouter()
+# Configure logging
+logger = logging.getLogger(__name__)
 
-# Initialize services
+# Initialize components
 data_fetcher = DataFetcher()
 predictor = PropPredictor()
+
+router = APIRouter()
 
 @router.get("/health")
 def health_check():
@@ -21,8 +26,6 @@ def health_check():
 def search_players(query: str = "", limit: int = 10, db: Session = Depends(get_db)):
     """Search for players in the dataset"""
     try:
-        data_fetcher = DataFetcher()
-        
         if not query or len(query) < 2:
             return {"players": [], "message": "Please provide a search query with at least 2 characters"}
         
@@ -65,8 +68,6 @@ def search_players(query: str = "", limit: int = 10, db: Session = Depends(get_d
 def get_available_teams(db: Session = Depends(get_db)):
     """Get all available teams from the dataset"""
     try:
-        data_fetcher = DataFetcher()
-        
         # Get all available teams from the dataset
         all_teams = data_fetcher.get_available_teams()
         
@@ -82,8 +83,6 @@ def get_available_teams(db: Session = Depends(get_db)):
 def get_popular_players(limit: int = 20, db: Session = Depends(get_db)):
     """Get popular players (players with most matches)"""
     try:
-        data_fetcher = DataFetcher()
-        
         # Get all players and their match counts
         all_players = data_fetcher.get_available_players()
         
@@ -103,8 +102,6 @@ def get_popular_players(limit: int = 20, db: Session = Depends(get_db)):
 def validate_player(player_name: str, db: Session = Depends(get_db)):
     """Validate if a player exists in the dataset"""
     try:
-        data_fetcher = DataFetcher()
-        
         # Get all available players
         all_players = data_fetcher.get_available_players()
         
@@ -146,23 +143,22 @@ def validate_player(player_name: str, db: Session = Depends(get_db)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error validating player: {str(e)}")
 
-@router.post("/predict", response_model=PredictionResponse)
-def predict_prop(request: PropRequest, db: Session = Depends(get_db)):
-    """Make a prediction for a player prop with map-range support"""
+@router.post("/predict")
+async def predict_prop(prop_request: PropRequest, verbose: bool = False, db: Session = Depends(get_db)):
+    """Make a prediction for a prop"""
     try:
         # Validate player exists first
-        data_fetcher = DataFetcher()
         all_players = data_fetcher.get_available_players()
         
         player_exists = any(
-            player.lower() == request.player_name.lower() 
+            player.lower() == prop_request.player_name.lower() 
             for player in all_players
         )
         
         if not player_exists:
             # Find similar players for suggestions
             similar_players = []
-            player_name_lower = request.player_name.lower()
+            player_name_lower = prop_request.player_name.lower()
             
             for player in all_players:
                 if (player_name_lower in player.lower() or 
@@ -173,78 +169,247 @@ def predict_prop(request: PropRequest, db: Session = Depends(get_db)):
                 status_code=400, 
                 detail={
                     "error": "Player not found in dataset",
-                    "player_name": request.player_name,
+                    "player_name": prop_request.player_name,
                     "suggestions": similar_players[:5],
                     "message": "Please use a valid player name from the dataset"
                 }
             )
         
-        # Get map range from request
-        map_range = getattr(request, 'map_range', [1, 2])  # Default to Maps 1-2
-        if not map_range:
-            map_range = [1, 2]  # Fallback default
+        # Extract map range from request
+        map_range = prop_request.map_range if prop_request.map_range else [1]
         
         # Get player stats with map range
-        player_stats = data_fetcher.get_player_stats(request.player_name, db, map_range)
+        player_stats = data_fetcher.get_player_stats(
+            prop_request.player_name, 
+            db, 
+            map_range=map_range
+        )
         
-        # Add map range to prop request
-        prop_request_dict = request.dict()
-        prop_request_dict['map_range'] = map_range
+        # Convert to dict for predictor
+        prop_request_dict = prop_request.dict()
+        prop_request_dict["map_range"] = map_range
         
-        # Make prediction
-        predictor = PropPredictor()
-        prediction_result = predictor.predict(player_stats, prop_request_dict)
+        # Make prediction with verbose parameter
+        prediction_result = predictor.predict(player_stats, prop_request_dict, verbose=verbose)
         
-        return PredictionResponse(
-            prediction=prediction_result["prediction"],
-            confidence=prediction_result["confidence"],
-            reasoning=prediction_result["reasoning"],
-            player_stats=player_stats,
-            prop_request=prop_request_dict
+        # Add player stats to response
+        prediction_result["player_stats"] = player_stats
+        prediction_result["prop_request"] = prop_request_dict
+        
+        # Return with no-cache headers
+        return JSONResponse(
+            content=prediction_result,
+            headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"}
         )
         
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error making prediction: {str(e)}")
+        logger.error(f"Error in prediction: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/playerstats/{player_name}", response_model=PlayerStatsResponse)
-def get_player_stats(player_name: str, db: Session = Depends(get_db)):
+@router.get("/playerstats/{player_name}")
+async def get_player_stats(player_name: str, db: Session = Depends(get_db)):
     """Get player statistics"""
     try:
-        data_fetcher = DataFetcher()
         player_stats = data_fetcher.get_player_stats(player_name, db)
         
-        return PlayerStatsResponse(
-            player_name=player_stats["player_name"],
-            recent_matches=player_stats["recent_matches"],
-            avg_kills=player_stats["avg_kills"],
-            avg_assists=player_stats["avg_assists"],
-            avg_cs=player_stats["avg_cs"],
-            avg_deaths=player_stats["avg_deaths"],
-            win_rate=player_stats["win_rate"],
-            data_source=player_stats["data_source"],
+        # Create response with explicit fields
+        response = PlayerStatsResponse(
+            player_name=player_stats.get("player_name", player_name),
+            recent_matches=player_stats.get("recent_matches", []),
+            avg_kills=player_stats.get("avg_kills", 0.0),
+            avg_assists=player_stats.get("avg_assists", 0.0),
+            avg_cs=player_stats.get("avg_cs", 0.0),
+            avg_deaths=player_stats.get("avg_deaths", 0.0),
+            win_rate=player_stats.get("win_rate", 0.0),
+            data_source=player_stats.get("data_source", "none"),
             data_years=player_stats.get("data_years", "No data available")
         )
         
+        # Return with no-cache headers
+        return JSONResponse(
+            content=response.dict(),
+            headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"}
+        )
+        
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error getting player stats: {str(e)}")
+        logger.error(f"Error getting player stats: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/model/info")
 def get_model_info():
     """Get information about the current ML model"""
     try:
-        predictor = PropPredictor()
         return predictor.get_model_info()
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error getting model info: {str(e)}")
 
 @router.get("/model/features")
 def get_feature_importance():
-    """Get feature importance scores"""
+    """Get feature importance scores from the model"""
     try:
-        predictor = PropPredictor()
         feature_importance = predictor.get_feature_importance()
-        return {"feature_importance": feature_importance}
+        return {
+            "feature_importance": feature_importance,
+            "total_features": len(feature_importance)
+        }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error getting feature importance: {str(e)}") 
+        raise HTTPException(status_code=500, detail=f"Error getting feature importance: {str(e)}")
+
+@router.post("/statistics/probability-distribution")
+async def get_probability_distribution(prop_request: PropRequest, range_std: float = 5.0):
+    """Get probability distribution for a range of values around the prop value"""
+    try:
+        # Validate player exists
+        player_name = prop_request.player_name
+        if not data_fetcher.player_exists(player_name):
+            raise HTTPException(status_code=404, detail=f"Player '{player_name}' not found in dataset")
+        
+        # Get player stats - use mock db to avoid database dependency
+        class MockDB:
+            def __init__(self):
+                pass
+        
+        mock_db = MockDB()
+        player_stats = data_fetcher.get_player_stats(
+            player_name=player_name,
+            db=mock_db,
+            map_range=prop_request.map_range
+        )
+        
+        if not player_stats:
+            raise HTTPException(status_code=404, detail=f"No data found for player '{player_name}'")
+        
+        # Calculate probability distribution
+        distribution_result = predictor.calculate_probability_distribution(
+            player_stats=player_stats,
+            prop_request=prop_request.dict(),
+            range_std=range_std
+        )
+        
+        if "error" in distribution_result:
+            raise HTTPException(status_code=400, detail=distribution_result["error"])
+        
+        return {
+            "player_name": player_name,
+            "prop_request": prop_request.dict(),
+            "probability_distribution": distribution_result["probability_distribution"],
+            "summary_stats": distribution_result["summary_stats"],
+            "analysis_range": distribution_result["analysis_range"],
+            "range_std": range_std
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error calculating probability distribution: {e}")
+        raise HTTPException(status_code=500, detail=f"Error calculating probability distribution: {str(e)}")
+
+@router.post("/statistics/insights")
+async def get_statistical_insights(prop_request: PropRequest):
+    """Get detailed statistical insights for the current prediction"""
+    try:
+        # Validate player exists
+        player_name = prop_request.player_name
+        if not data_fetcher.player_exists(player_name):
+            raise HTTPException(status_code=404, detail=f"Player '{player_name}' not found in dataset")
+        
+        # Get player stats - use mock db to avoid database dependency
+        class MockDB:
+            def __init__(self):
+                pass
+        
+        mock_db = MockDB()
+        player_stats = data_fetcher.get_player_stats(
+            player_name=player_name,
+            db=mock_db,
+            map_range=prop_request.map_range
+        )
+        
+        if not player_stats:
+            raise HTTPException(status_code=404, detail=f"No data found for player '{player_name}'")
+        
+        # Get statistical insights
+        insights_result = predictor.get_statistical_insights(
+            player_stats=player_stats,
+            prop_request=prop_request.dict()
+        )
+        
+        if "error" in insights_result:
+            raise HTTPException(status_code=400, detail=insights_result["error"])
+        
+        return {
+            "player_name": player_name,
+            "prop_request": prop_request.dict(),
+            "statistical_measures": insights_result["statistical_measures"],
+            "probability_analysis": insights_result["probability_analysis"],
+            "confidence_intervals": insights_result["confidence_intervals"],
+            "trend_analysis": insights_result["trend_analysis"],
+            "volatility_metrics": insights_result["volatility_metrics"]
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting statistical insights: {e}")
+        raise HTTPException(status_code=500, detail=f"Error getting statistical insights: {str(e)}")
+
+@router.post("/statistics/comprehensive")
+async def get_comprehensive_statistics(prop_request: PropRequest, range_std: float = 5.0):
+    """Get comprehensive statistical analysis including prediction, probability distribution, and insights"""
+    try:
+        # Validate player exists
+        player_name = prop_request.player_name
+        if not data_fetcher.player_exists(player_name):
+            raise HTTPException(status_code=404, detail=f"Player '{player_name}' not found in dataset")
+        
+        # Get player stats - use mock db to avoid database dependency
+        class MockDB:
+            def __init__(self):
+                pass
+        
+        mock_db = MockDB()
+        player_stats = data_fetcher.get_player_stats(
+            player_name=player_name,
+            db=mock_db,
+            map_range=prop_request.map_range
+        )
+        
+        if not player_stats:
+            raise HTTPException(status_code=404, detail=f"No data found for player '{player_name}'")
+        
+        # Get prediction
+        prediction_result = predictor.predict(
+            player_stats=player_stats,
+            prop_request=prop_request.dict(),
+            verbose=True
+        )
+        
+        # Get probability distribution
+        distribution_result = predictor.calculate_probability_distribution(
+            player_stats=player_stats,
+            prop_request=prop_request.dict(),
+            range_std=range_std
+        )
+        
+        # Get statistical insights
+        insights_result = predictor.get_statistical_insights(
+            player_stats=player_stats,
+            prop_request=prop_request.dict()
+        )
+        
+        return {
+            "player_name": player_name,
+            "prop_request": prop_request.dict(),
+            "prediction": prediction_result,
+            "probability_distribution": distribution_result.get("probability_distribution", {}),
+            "statistical_insights": insights_result,
+            "summary_stats": distribution_result.get("summary_stats", {}),
+            "analysis_range": distribution_result.get("analysis_range", {}),
+            "range_std": range_std
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting comprehensive statistics: {e}")
+        raise HTTPException(status_code=500, detail=f"Error getting comprehensive statistics: {str(e)}") 

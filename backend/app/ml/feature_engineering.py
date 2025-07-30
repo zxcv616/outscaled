@@ -98,9 +98,9 @@ class FeatureEngineer:
     def __init__(self):
         # Extract constants to class variables
         self.STRONG_TEAMS = {
-            'T1', 'Gen.G', 'JDG', 'BLG', 'TES', 'WBG', 'LNG', 'EDG', 'RNG', 'OMG',
-            'G2', 'FNC', 'MAD', 'VIT', 'KOI', 'TH', 'SK', 'BDS', 'AST', 'GX',
-            'C9', 'TL', '100T', 'EG', 'FLY', 'GG', 'IMT', 'DIG', 'CLG', 'TSM'
+            'T1', 'Gen.G', 'JD Gaming', 'Bilibili Gaming', 'G2 Esports', 
+            'Fnatic', 'Team Liquid', 'Cloud9', '100 Thieves', 'TSM',
+            'DRX', 'DWG KIA', 'T1', 'Gen.G', 'KT Rolster', 'Hanwha Life Esports'
         }
         
         self.TOURNAMENT_TIERS = {
@@ -118,16 +118,22 @@ class FeatureEngineer:
             'support': 0.8
         }
         
+        # Feature names list (34 features total: 14 base + 17 derived + 3 recent form)
         self.feature_names = [
+            # Base features (14)
             'avg_kills', 'avg_assists', 'avg_cs', 'avg_deaths', 'avg_gold', 
             'avg_damage', 'avg_vision', 'recent_kills_avg', 'recent_assists_avg', 
             'recent_cs_avg', 'win_rate', 'avg_kda', 'avg_gpm', 'avg_kp_percent',
-            'consistency_score', 'recent_form_trend', 'data_source_quality',
-            'maps_played', 'opponent_strength', 'tournament_tier',
-            'position_factor', 'champion_pool_size', 'team_synergy',
-            'meta_adaptation', 'pressure_handling', 'late_game_performance',
-            'early_game_impact', 'mid_game_transition', 'objective_control',
-            'champion_performance_variance', 'role_specific_performance'
+            
+            # Derived features (17)
+            'consistency_score', 'recent_form_trend', 'data_source_quality', 
+            'maps_played', 'opponent_strength', 'tournament_tier', 'position_factor',
+            'champion_pool_size', 'team_synergy', 'meta_adaptation', 'pressure_handling',
+            'late_game_performance', 'early_game_impact', 'mid_game_transition',
+            'objective_control', 'champion_performance_variance', 'role_specific_performance',
+            
+            # Recent form features (3)
+            'recent_vs_season_ratio', 'recent_win_rate', 'recent_volatility'
         ]
     
     def engineer_features(self, player_stats: Dict, prop_request: Dict, 
@@ -175,58 +181,121 @@ class FeatureEngineer:
             return self._create_minimal_features(prop_request)
     
     def _extract_base_features(self, player_stats: Dict, prop_request: Dict) -> List[float]:
-        """Extract base player statistics (14 features)"""
-        # Get map range from prop request
-        map_range = prop_request.get('map_range', [1])
-        maps_played = len(map_range)
-        
-        # IMPROVED: Calculate normalized averages instead of simple multiplication
-        normalization_factor = max(maps_played, 1)  # Avoid division by zero
-        
-        # Basic player statistics (14 features) - now properly normalized
-        base_features = [
-            player_stats.get('avg_kills', 0.0) / normalization_factor,  # Normalized average
-            player_stats.get('avg_assists', 0.0) / normalization_factor,
-            player_stats.get('avg_cs', 0.0) / normalization_factor,
-            player_stats.get('avg_deaths', 0.0) / normalization_factor,
-            player_stats.get('avg_gold', 0.0) / normalization_factor,
-            player_stats.get('avg_damage', 0.0) / normalization_factor,
-            player_stats.get('avg_vision', 0.0) / normalization_factor,
-            player_stats.get('recent_kills_avg', 0.0) / normalization_factor,
-            player_stats.get('recent_assists_avg', 0.0) / normalization_factor,
-            player_stats.get('recent_cs_avg', 0.0) / normalization_factor,
-            player_stats.get('win_rate', 0.0),  # Win rate doesn't need normalization
-            player_stats.get('avg_kda', 0.0),   # KDA doesn't need normalization
-            player_stats.get('avg_gpm', 0.0),   # GPM doesn't need normalization
-            player_stats.get('avg_kp_percent', 0.0)  # KP% doesn't need normalization
-        ]
-        
-        return base_features
+        """Extract base statistical features"""
+        try:
+            # Base statistics (14 features)
+            features = [
+                player_stats.get("avg_kills", 0.0),
+                player_stats.get("avg_assists", 0.0),
+                player_stats.get("avg_cs", 0.0),
+                player_stats.get("avg_deaths", 0.0),
+                player_stats.get("avg_gold", 0.0),
+                player_stats.get("avg_damage", 0.0),
+                player_stats.get("avg_vision", 0.0),
+                player_stats.get("recent_kills_avg", 0.0),
+                player_stats.get("recent_assists_avg", 0.0),
+                player_stats.get("recent_cs_avg", 0.0),
+                player_stats.get("win_rate", 0.0),
+                player_stats.get("avg_kda", 0.0),
+                player_stats.get("avg_gpm", 0.0),
+                player_stats.get("avg_kp_percent", 0.0)
+            ]
+            
+            # FIX: Calculate recent averages if they're null
+            recent_matches = player_stats.get("recent_matches", [])
+            if recent_matches:
+                # Calculate recent averages from actual match data
+                recent_kills = [m.get("kills", 0) for m in recent_matches[:5]]
+                recent_assists = [m.get("assists", 0) for m in recent_matches[:5]]
+                recent_cs = [m.get("cs", 0) for m in recent_matches[:5]]
+                
+                if recent_kills and features[7] == 0.0:  # recent_kills_avg is null/0
+                    features[7] = sum(recent_kills) / len(recent_kills)
+                if recent_assists and features[8] == 0.0:  # recent_assists_avg is null/0
+                    features[8] = sum(recent_assists) / len(recent_assists)
+                if recent_cs and features[9] == 0.0:  # recent_cs_avg is null/0
+                    features[9] = sum(recent_cs) / len(recent_cs)
+            
+            return features
+            
+        except Exception as e:
+            logger.error(f"Error extracting base features: {e}")
+            return [0.0] * 14
     
     def _extract_derived_features(self, player_stats: Dict, prop_request: Dict) -> List[float]:
-        """Extract derived features (17 features)"""
-        derived_features = [
-            self._calculate_consistency_score(player_stats),
-            self._calculate_recent_form_trend(player_stats),
-            self._calculate_dynamic_data_quality(player_stats),  # IMPROVED: Dynamic quality
-            # prop_value removed from training features to prevent data leakage
-            len(prop_request.get('map_range', [1])),  # Use maps_played instead of map_number
-            self._calculate_opponent_strength(prop_request),
-            self._calculate_tournament_tier(prop_request),
-            self._calculate_position_factor(player_stats),
-            self._calculate_champion_pool_size(player_stats),
-            self._calculate_team_synergy(player_stats),
-            self._calculate_meta_adaptation(player_stats),
-            self._calculate_pressure_handling(player_stats, prop_request),  # IMPROVED: Context-aware
-            self._calculate_late_game_performance(player_stats),
-            self._calculate_early_game_impact(player_stats),
-            self._calculate_mid_game_transition(player_stats),
-            self._calculate_objective_control(player_stats),  # FIXED: Added missing feature
-            self._calculate_champion_performance_variance(player_stats),  # NEW: Champion variance
-            self._calculate_role_specific_performance(player_stats) # NEW: Role-specific performance
-        ]
-        
-        return derived_features
+        """Extract derived/computed features"""
+        try:
+            # Get map range from prop request
+            map_range = prop_request.get('map_range', [1])
+            maps_played = len(map_range)
+            
+            # Calculate recent form features
+            recent_matches = player_stats.get("recent_matches", [])
+            recent_form_features = self._calculate_recent_form_features(recent_matches, player_stats)
+            
+            # Derived features (17 features)
+            derived_features = [
+                self._calculate_consistency_score(player_stats),
+                self._calculate_recent_form_trend(player_stats),
+                self._calculate_dynamic_data_quality(player_stats),
+                maps_played,  # Number of maps in prediction range
+                self._calculate_opponent_strength(prop_request),
+                self._calculate_tournament_tier(prop_request),
+                self._calculate_position_factor(player_stats),
+                self._calculate_champion_pool_size(player_stats),
+                self._calculate_team_synergy(player_stats),
+                self._calculate_meta_adaptation(player_stats),
+                self._calculate_pressure_handling(player_stats, prop_request),
+                self._calculate_late_game_performance(player_stats),
+                self._calculate_early_game_impact(player_stats),
+                self._calculate_mid_game_transition(player_stats),
+                self._calculate_objective_control(player_stats),
+                self._calculate_champion_performance_variance(player_stats),
+                self._calculate_role_specific_performance(player_stats)
+            ]
+            
+            # Add recent form features
+            derived_features.extend(recent_form_features)
+            
+            return derived_features
+            
+        except Exception as e:
+            logger.error(f"Error extracting derived features: {e}")
+            return [0.0] * 20  # 17 base + 3 recent form features
+    
+    def _calculate_recent_form_features(self, recent_matches: List[Dict], player_stats: Dict) -> List[float]:
+        """Calculate recent form features to better capture recent performance"""
+        try:
+            if not recent_matches:
+                return [0.5, 0.5, 0.5]  # Neutral values if no recent matches
+            
+            # Feature 1: Recent vs Season Performance Ratio
+            recent_kills = [m.get("kills", 0) for m in recent_matches[:5]]
+            recent_avg = sum(recent_kills) / len(recent_kills) if recent_kills else 0
+            season_avg = player_stats.get("avg_kills", 1.0)  # Avoid division by zero
+            
+            if season_avg > 0:
+                performance_ratio = recent_avg / season_avg
+                performance_ratio = min(max(performance_ratio, 0.1), 3.0)  # Cap between 0.1 and 3.0
+            else:
+                performance_ratio = 1.0
+            
+            # Feature 2: Recent Win Rate (last 5 matches)
+            recent_wins = sum(1 for m in recent_matches[:5] if m.get("win", False))
+            recent_win_rate = recent_wins / min(5, len(recent_matches))
+            
+            # Feature 3: Recent Performance Volatility
+            if len(recent_kills) >= 2:
+                volatility = np.std(recent_kills) / (np.mean(recent_kills) + 0.1)  # Add small constant
+                volatility = min(max(volatility, 0.0), 2.0)  # Cap between 0 and 2
+            else:
+                volatility = 0.5  # Neutral if not enough data
+            
+            return [performance_ratio, recent_win_rate, volatility]
+            
+        except Exception as e:
+            logger.error(f"Error calculating recent form features: {e}")
+            return [0.5, 0.5, 0.5]
     
     def _normalize_score(self, value: float, expected_max: float) -> float:
         """Helper function to normalize scores to [0, 1] range"""
@@ -651,15 +720,15 @@ class FeatureEngineer:
     def _create_minimal_features(self, prop_request: Dict) -> np.ndarray:
         """Create minimal features for fallback cases"""
         try:
-            features = [0.0] * 31  # Initialize with zeros for 31 features (prop_value removed)
+            features = [0.0] * 34  # Initialize with zeros for 34 features
             
-            # Set basic values (prop_value removed from training features)
+            # Set basic values
             features[16] = len(prop_request.get('map_range', [1]))  # maps_played
             
             return np.array(features, dtype=np.float32)
         except Exception as e:
             logger.error(f"Error creating minimal features: {e}")
-            return np.zeros(31, dtype=np.float32)
+            return np.zeros(34, dtype=np.float32)
     
     def get_feature_names(self) -> List[str]:
         """Get list of feature names"""

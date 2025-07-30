@@ -6,12 +6,21 @@ import os
 import logging
 import re
 from app.core.config import settings
-from app.models.database import Player, PlayerMatch, Match
+# Make database import optional to avoid psycopg2 dependency
+try:
+    from app.models.database import Player, PlayerMatch, Match
+    DATABASE_AVAILABLE = True
+except ImportError:
+    DATABASE_AVAILABLE = False
+    Player = None
+    PlayerMatch = None
+    Match = None
 from app.utils.data_utils import (
     create_map_index_column, 
     safe_division, 
     validate_required_columns, 
-    extract_year_from_filename
+    extract_year_from_filename,
+    aggregate_stats_by_map_range
 )
 from sqlalchemy.orm import Session
 
@@ -140,79 +149,157 @@ class DataFetcher:
             
             logger.info(f"Found {len(player_matches)} total matches for {player_name}")
             
-            # Filter for specific map range if provided
+            # Create map index for the player matches
+            player_matches_with_index = create_map_index_column(player_matches)
+            
+            # Handle map range aggregation
             if map_range and map_range != [1]:
-                player_matches_filtered = player_matches[player_matches['map_index_within_series'].isin(map_range)]
-                logger.info(f"Filtered to {len(player_matches_filtered)} matches for map range {map_range}")
+                # Use the aggregation utility to properly sum stats across map range
                 
-                # If no matches in requested range, use all matches but warn
-                if player_matches_filtered.empty:
+                # Aggregate stats across the map range
+                aggregated_stats = aggregate_stats_by_map_range(player_matches_with_index, map_range)
+                
+                if aggregated_stats.empty:
                     logger.warning(f"No data found for player {player_name} in map range {map_range}. Using all available data.")
                     player_matches_filtered = player_matches
                     map_range_warning = f" (Note: No data available for maps {map_range}, using all matches)"
                 else:
-                    player_matches_filtered = player_matches_filtered
+                    # For aggregated data, we need to calculate averages from the sums
+                    # The aggregated data contains summed stats across map ranges
+                    player_matches_filtered = aggregated_stats
                     map_range_warning = ""
+                    logger.info(f"Aggregated {len(aggregated_stats)} match series for map range {map_range}")
             else:
-                player_matches_filtered = player_matches
+                # Single map - use original filtering
+                player_matches_filtered = player_matches_with_index[player_matches_with_index['map_index_within_series'].isin(map_range)]
                 map_range_warning = ""
             
             if player_matches_filtered.empty:
                 logger.warning(f"No data found for player {player_name}")
                 return self._get_minimal_stats(player_name)
             
-            logger.info(f"Using {len(player_matches_filtered)} matches for {player_name}")
+            logger.info(f"Using {len(player_matches_filtered)} matches/series for {player_name}")
             
-            # Get recent matches (last 10)
-            recent_matches = player_matches_filtered.sort_values("date", ascending=False).head(10)
+            # Get recent matches (last 10) - filter by map range
+            if map_range and map_range != [1]:
+                # For multi-map ranges, use the aggregated data for recent matches
+                recent_matches = player_matches_filtered.sort_values("date", ascending=False).head(10)
+            else:
+                # For single map, use filtered data
+                recent_matches = player_matches_filtered.sort_values("date", ascending=False).head(10)
             
-            # Calculate comprehensive statistics (per-map averages only - no scaling here)
+            # DEBUG: Check recent matches data
+            logger.debug(f"Recent matches shape: {recent_matches.shape}")
+            logger.debug(f"Recent matches columns: {recent_matches.columns.tolist()}")
+            if not recent_matches.empty:
+                logger.debug(f"Recent kills sample: {recent_matches['kills'].head().tolist()}")
+                logger.debug(f"Recent kills mean: {recent_matches['kills'].mean()}")
+                logger.debug(f"Recent kills isna: {recent_matches['kills'].isna().sum()}")
+            else:
+                logger.warning(f"Recent matches is empty for {player_name}")
+            
+            # Calculate comprehensive statistics
             maps_played = len(map_range) if map_range and map_range != [1] else 1
             
-            # Get data year distribution for this player
-            data_years = player_matches_filtered['data_year'].value_counts().to_dict()
+            # Get data year distribution for this player (use original data)
+            data_years = player_matches['data_year'].value_counts().to_dict()
             data_years_str = ", ".join([f"{year} ({count} matches)" for year, count in data_years.items()])
             
             logger.debug(f"data_years calculation for {player_name}:")
             logger.debug(f"  data_years dict: {data_years}")
             logger.debug(f"  data_years_str: {data_years_str}")
             
-            # Return per-map averages only - scaling will be handled in feature engineering
-            stats = {
-                "player_name": player_name,
-                "recent_matches": self._format_recent_matches(recent_matches),
-                "avg_kills": player_matches_filtered["kills"].mean(),  # Per-map average only
-                "avg_assists": player_matches_filtered["assists"].mean(),
-                "avg_cs": player_matches_filtered["total cs"].mean(),
-                "avg_deaths": player_matches_filtered["deaths"].mean(),
-                "avg_gold": player_matches_filtered["earnedgold"].mean(),
-                "avg_damage": player_matches_filtered.get("dpm", pd.Series([0.0])).mean(),
-                "avg_vision": player_matches_filtered.get("visionscore", pd.Series([0.0])).mean(),
-                "recent_kills_avg": recent_matches["kills"].mean(),
-                "recent_assists_avg": recent_matches["assists"].mean(),
-                "recent_cs_avg": recent_matches["total cs"].mean(),
-                "win_rate": (player_matches_filtered["result"] == 1).mean(),
-                "avg_kda": player_matches_filtered["kda"].mean(),
-                "avg_gpm": player_matches_filtered["gpm"].mean(),
-                "avg_kp_percent": player_matches_filtered["kp_percent"].mean(),
-                "data_source": "oracles_elixir",
-                "data_years": data_years_str,
-                "map_range": map_range,
-                "maps_played": maps_played,  # Include separately for feature engineering
-                "map_range_warning": map_range_warning,
-                "total_matches_available": len(player_matches),
-                "matches_in_range": len(player_matches_filtered)
-            }
+            # Calculate statistics based on whether we're using aggregated or individual map data
+            if map_range and map_range != [1]:
+                # For aggregated data, the stats are already summed across the map range
+                # We need to calculate averages from the sums
+                total_maps = player_matches_filtered['map_index_within_series'].sum()  # Count of maps played
+                
+                # For recent averages, use the filtered recent_matches
+                recent_kills_avg = recent_matches["kills"].head(5).mean() if not recent_matches.empty else 0.0
+                recent_assists_avg = recent_matches["assists"].head(5).mean() if not recent_matches.empty else 0.0
+                recent_cs_avg = recent_matches["total cs"].head(5).mean() if not recent_matches.empty else 0.0
+                
+                # For win rate and other stats that need the original data structure
+                win_rate = (player_matches["result"] == 1).mean()
+                avg_kda = player_matches["kda"].mean()
+                avg_gpm = player_matches["gpm"].mean()
+                avg_kp_percent = player_matches["kp_percent"].mean()
+                
+                stats = {
+                    "player_name": player_name,
+                    "recent_matches": self._format_recent_matches(recent_matches),
+                    "avg_kills": player_matches_filtered["kills"].sum() / max(total_maps, 1),  # Average per map
+                    "avg_assists": player_matches_filtered["assists"].sum() / max(total_maps, 1),
+                    "avg_cs": player_matches_filtered["total cs"].sum() / max(total_maps, 1),
+                    "avg_deaths": player_matches_filtered["deaths"].sum() / max(total_maps, 1),
+                    "avg_gold": player_matches_filtered["earnedgold"].sum() / max(total_maps, 1),
+                    "avg_damage": player_matches.get("dpm", pd.Series([0.0])).mean(),  # Use original data for dpm
+                    "avg_vision": player_matches.get("visionscore", pd.Series([0.0])).mean(),  # Use original data for vision
+                    "recent_kills_avg": recent_kills_avg,
+                    "recent_assists_avg": recent_assists_avg,
+                    "recent_cs_avg": recent_cs_avg,
+                    "win_rate": win_rate,
+                    "avg_kda": avg_kda,
+                    "avg_gpm": avg_gpm,
+                    "avg_kp_percent": avg_kp_percent,
+                    "data_source": "oracles_elixir",
+                    "data_years": data_years_str,
+                    "map_range": map_range,
+                    "maps_played": maps_played,
+                    "map_range_warning": map_range_warning,
+                    "total_matches_available": len(player_matches),
+                    "matches_in_range": len(player_matches_filtered)
+                }
+            else:
+                # For single map data, use per-map averages
+                # For recent averages, use the filtered recent_matches
+                recent_kills_avg = recent_matches["kills"].head(5).mean() if not recent_matches.empty else 0.0
+                recent_assists_avg = recent_matches["assists"].head(5).mean() if not recent_matches.empty else 0.0
+                recent_cs_avg = recent_matches["total cs"].head(5).mean() if not recent_matches.empty else 0.0
+                
+                stats = {
+                    "player_name": player_name,
+                    "recent_matches": self._format_recent_matches(recent_matches),
+                    "avg_kills": player_matches_filtered["kills"].mean(),
+                    "avg_assists": player_matches_filtered["assists"].mean(),
+                    "avg_cs": player_matches_filtered["total cs"].mean(),
+                    "avg_deaths": player_matches_filtered["deaths"].mean(),
+                    "avg_gold": player_matches_filtered["earnedgold"].mean(),
+                    "avg_damage": player_matches_filtered.get("dpm", pd.Series([0.0])).mean(),
+                    "avg_vision": player_matches_filtered.get("visionscore", pd.Series([0.0])).mean(),
+                    "recent_kills_avg": recent_kills_avg,
+                    "recent_assists_avg": recent_assists_avg,
+                    "recent_cs_avg": recent_cs_avg,
+                    "win_rate": (player_matches_filtered["result"] == 1).mean(),
+                    "avg_kda": player_matches_filtered["kda"].mean(),
+                    "avg_gpm": player_matches_filtered["gpm"].mean(),
+                    "avg_kp_percent": player_matches_filtered["kp_percent"].mean(),
+                    "data_source": "oracles_elixir",
+                    "data_years": data_years_str,
+                    "map_range": map_range,
+                    "maps_played": maps_played,
+                    "map_range_warning": map_range_warning,
+                    "total_matches_available": len(player_matches),
+                    "matches_in_range": len(player_matches_filtered)
+                }
+            
+            # DEBUG: Check the calculated values
+            logger.debug(f"Calculated stats for {player_name}:")
+            logger.debug(f"  recent_kills_avg: {stats.get('recent_kills_avg')}")
+            logger.debug(f"  avg_kills: {stats.get('avg_kills')}")
+            logger.debug(f"  win_rate: {stats.get('win_rate')}")
             
             # Handle NaN values
             for key, value in stats.items():
                 if isinstance(value, float) and np.isnan(value):
+                    logger.warning(f"NaN value found for {key}, setting to 0.0")
                     stats[key] = 0.0
             
             return stats
             
         except Exception as e:
-            logger.error(f"Error processing player data: {e}")
+            logger.error(f"Error getting player stats for {player_name}: {e}")
             return self._get_minimal_stats(player_name)
     
     def _format_recent_matches(self, recent_matches: pd.DataFrame) -> List[Dict]:
@@ -285,17 +372,29 @@ class DataFetcher:
         return players
     
     def get_available_teams(self) -> List[str]:
-        """Get list of available teams in the dataset"""
-        if self.df is None or self.df.empty:
+        """Get all available teams from the dataset"""
+        try:
+            if self.df is None or self.df.empty:
+                return []
+            
+            teams = self.df['teamname'].dropna().unique().tolist()
+            return sorted(teams)
+        except Exception as e:
+            logger.error(f"Error getting available teams: {e}")
             return []
-        
-        # Get unique team names, drop NaN values, and convert to string
-        teams = self.df["teamname"].dropna().astype(str).unique().tolist()
-        
-        # Sort alphabetically, case-insensitive
-        teams.sort(key=lambda x: x.lower())
-        
-        return teams
+    
+    def player_exists(self, player_name: str) -> bool:
+        """Check if a player exists in the dataset"""
+        try:
+            if self.df is None or self.df.empty:
+                return False
+            
+            # Check if player exists (case-insensitive)
+            player_exists = self.df['playername'].str.lower().str.contains(player_name.lower(), na=False).any()
+            return player_exists
+        except Exception as e:
+            logger.error(f"Error checking if player exists: {e}")
+            return False
     
     def get_player_matches_by_league(self, player_name: str, league: str = None) -> List[Dict]:
         """Get player matches filtered by league"""

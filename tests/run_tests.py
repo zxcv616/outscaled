@@ -170,6 +170,181 @@ def test_map_range_prediction():
         print(f"❌ Map-range prediction error: {e}")
         return False
 
+def test_map_range_aggregation():
+    """Test that map range aggregation produces different results than single map"""
+    print("Testing map range aggregation...")
+    try:
+        # Test single map prediction
+        prediction_data_single = {
+            "player_name": "Garden",
+            "prop_type": "kills",
+            "prop_value": 5.5,
+            "opponent": "Hanwha Life Esports Challengers",
+            "tournament": "LCS",
+            "map_range": [1],
+            "start_map": 1,
+            "end_map": 1
+        }
+        
+        response_single = requests.post(
+            f"{API_BASE}/predict",
+            headers={"Content-Type": "application/json"},
+            json=prediction_data_single,
+            timeout=10
+        )
+        
+        if response_single.status_code != 200:
+            print(f"❌ Single map prediction failed: {response_single.status_code}")
+            return False
+        
+        data_single = response_single.json()
+        single_avg_kills = data_single.get("player_stats", {}).get("avg_kills", 0)
+        single_recent_kills = data_single.get("player_stats", {}).get("recent_kills_avg", 0)
+        
+        # Test map range prediction
+        prediction_data_range = {
+            "player_name": "Garden",
+            "prop_type": "kills",
+            "prop_value": 5.5,
+            "opponent": "Hanwha Life Esports Challengers",
+            "tournament": "LCS",
+            "map_range": [1, 2],
+            "start_map": 1,
+            "end_map": 2
+        }
+        
+        response_range = requests.post(
+            f"{API_BASE}/predict",
+            headers={"Content-Type": "application/json"},
+            json=prediction_data_range,
+            timeout=10
+        )
+        
+        if response_range.status_code != 200:
+            print(f"❌ Map range prediction failed: {response_range.status_code}")
+            return False
+        
+        data_range = response_range.json()
+        range_avg_kills = data_range.get("player_stats", {}).get("avg_kills", 0)
+        range_recent_kills = data_range.get("player_stats", {}).get("recent_kills_avg", 0)
+        
+        # Check if we're getting actual data
+        if single_avg_kills == 0 or range_avg_kills == 0:
+            print("❌ Map range aggregation failed - getting 0.0 values")
+            return False
+        
+        # Check if the values are different
+        kills_diff = abs(single_avg_kills - range_avg_kills)
+        recent_kills_diff = abs(single_recent_kills - range_recent_kills)
+        
+        print(f"Single map avg kills: {single_avg_kills:.2f}")
+        print(f"Map range avg kills: {range_avg_kills:.2f}")
+        print(f"Kills difference: {kills_diff:.2f}")
+        
+        if kills_diff > 0.01 or recent_kills_diff > 0.01:
+            print("✅ Map range aggregation is working!")
+            return True
+        else:
+            print("❌ Map range aggregation not working - values are identical")
+            return False
+            
+    except Exception as e:
+        print(f"❌ Map range aggregation test error: {e}")
+        return False
+
+def test_verbose_prediction():
+    """Test verbose prediction mode with detailed reasoning"""
+    print("Testing verbose prediction mode...")
+    try:
+        prediction_data = {
+            "player_name": "Garden",
+            "prop_type": "kills",
+            "prop_value": 5.5,
+            "opponent": "Hanwha Life Esports Challengers",
+            "tournament": "LCS",
+            "map_range": [1, 2],
+            "start_map": 1,
+            "end_map": 2
+        }
+        
+        # Test with verbose=True
+        response = requests.post(
+            f"{API_BASE}/predict?verbose=true",
+            headers={"Content-Type": "application/json"},
+            json=prediction_data,
+            timeout=10
+        )
+        
+        if response.status_code == 200:
+            data = response.json()
+            reasoning = data.get("reasoning", "").lower()
+            
+            # Check for verbose indicators
+            verbose_indicators = [
+                "coefficient of variation", "analysis based on", 
+                "using", "model uses", "engineered features"
+            ]
+            
+            if any(indicator in reasoning for indicator in verbose_indicators):
+                print("✅ Verbose prediction mode passed")
+                return True
+            else:
+                print("❌ Verbose prediction mode failed - no verbose indicators")
+                return False
+        else:
+            print(f"❌ Verbose prediction failed: {response.status_code}")
+            return False
+            
+    except Exception as e:
+        print(f"❌ Verbose prediction test error: {e}")
+        return False
+
+def test_model_transparency():
+    """Test model transparency features (model_mode, rule_override, scaler_status)"""
+    print("Testing model transparency features...")
+    try:
+        prediction_data = {
+            "player_name": "Garden",
+            "prop_type": "kills",
+            "prop_value": 5.5,
+            "opponent": "Hanwha Life Esports Challengers",
+            "tournament": "LCS",
+            "map_range": [1, 2],
+            "start_map": 1,
+            "end_map": 2
+        }
+        
+        response = requests.post(
+            f"{API_BASE}/predict",
+            headers={"Content-Type": "application/json"},
+            json=prediction_data,
+            timeout=10
+        )
+        
+        if response.status_code == 200:
+            data = response.json()
+            
+            # Check for transparency fields
+            transparency_fields = ["model_mode", "rule_override", "scaler_status"]
+            missing_fields = [field for field in transparency_fields if field not in data]
+            
+            if not missing_fields:
+                print("✅ Model transparency features present")
+                print(f"  Model mode: {data.get('model_mode', 'unknown')}")
+                print(f"  Rule override: {data.get('rule_override', False)}")
+                print(f"  Scaler status: {data.get('scaler_status', 'unknown')}")
+                return True
+            else:
+                print(f"❌ Model transparency failed - missing fields: {missing_fields}")
+                return False
+        else:
+            print(f"❌ Model transparency test failed: {response.status_code}")
+            return False
+            
+    except Exception as e:
+        print(f"❌ Model transparency test error: {e}")
+        return False
+
 def test_extreme_values():
     """Test prediction with extreme values"""
     print("Testing extreme value handling...")
@@ -216,10 +391,10 @@ def test_different_prop_types():
     for prop_type in prop_types:
         try:
             prediction_data = {
-                "player_name": "Smash",
+                "player_name": "Garden",
                 "prop_type": prop_type,
                 "prop_value": 5.0,
-                "opponent": "T1",
+                "opponent": "Hanwha Life Esports Challengers",
                 "tournament": "LCS",
                 "map_range": [1, 2],
                 "start_map": 1,
@@ -257,10 +432,10 @@ def test_statistical_reasoning():
     print("Testing statistical reasoning...")
     try:
         prediction_data = {
-            "player_name": "Smash",
+            "player_name": "Garden",
             "prop_type": "kills",
             "prop_value": 6.5,
-            "opponent": "Gen.G",
+            "opponent": "Hanwha Life Esports Challengers",
             "tournament": "LCS",
             "map_range": [1, 2],
             "start_map": 1,
@@ -338,10 +513,10 @@ def test_deterministic_predictions():
     print("Testing deterministic predictions...")
     try:
         prediction_data = {
-            "player_name": "Smash",
+            "player_name": "Garden",
             "prop_type": "kills",
             "prop_value": 4.5,
-            "opponent": "T1",
+            "opponent": "Hanwha Life Esports Challengers",
             "tournament": "LCS",
             "map_range": [1, 2],
             "start_map": 1,
@@ -407,6 +582,9 @@ def main():
         test_teams_endpoint,
         test_basic_prediction,
         test_map_range_prediction,
+        test_map_range_aggregation,  # NEW: Test map range aggregation
+        test_verbose_prediction,      # NEW: Test verbose mode
+        test_model_transparency,      # NEW: Test transparency features
         test_extreme_values,
         test_different_prop_types,
         test_statistical_reasoning,
@@ -433,6 +611,9 @@ def main():
         print("   - Teams endpoint for opponent selection")
         print("   - Basic predictions with confidence")
         print("   - Map-range support (PrizePicks style)")
+        print("   - Map range aggregation (NEW)")
+        print("   - Verbose prediction mode (NEW)")
+        print("   - Model transparency features (NEW)")
         print("   - Extreme value handling")
         print("   - All prop types (kills, assists, cs, deaths, gold, damage)")
         print("   - Statistical reasoning analysis")

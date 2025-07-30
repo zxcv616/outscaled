@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JSON Copy Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        button { padding: 10px 20px; margin: 10px; background: #3b82f6; color: white; border: none; border-radius: 5px; cursor: pointer; }
+        button:hover { background: #2563eb; }
+        button.success { background: #10b981; }
+        pre { background: #f3f4f6; padding: 15px; border-radius: 5px; margin: 10px 0; }
+    </style>
+</head>
+<body>
+    <h1>JSON Copy Functionality Test</h1>
+    
+    <button id="copy-json-btn" onclick="handleCopyAsJson()">Copy as JSON</button>
+    
+    <h3>Sample Prediction Data:</h3>
+    <pre id="sample-data"></pre>
+    
+    <h3>Copied JSON (check your clipboard):</h3>
+    <pre id="copied-data"></pre>
+
+    <script>
+        // Sample prediction data similar to what the app would have
+        const samplePrediction = {
+            prediction: "MORE",
+            confidence: 75.5,
+            reasoning: "Recent kills average (8.2) above prop value (6.5). showing strong upward trend. with low volatility. prop value is 1.2 standard deviations from average. against Gen.G in LCS. champion pool: Kai'Sa, Ashe. Map 1. High confidence prediction based on High-quality Oracle's Elixir data.",
+            prop_request: {
+                player_name: "Gumayusi",
+                prop_type: "kills",
+                prop_value: 6.5,
+                opponent: "Gen.G",
+                tournament: "LCS",
+                map_range: [1],
+                start_map: 1,
+                end_map: 1
+            },
+            player_stats: {
+                player_name: "Gumayusi",
+                avg_kills: 8.2,
+                avg_assists: 7.0,
+                avg_cs: 294,
+                avg_deaths: 2.1,
+                avg_gold: 12500,
+                avg_damage: 25000,
+                avg_vision: 25,
+                recent_kills_avg: 8.2,
+                recent_assists_avg: 7.0,
+                recent_cs_avg: 294,
+                win_rate: 0.6,
+                avg_kda: 7.2,
+                avg_gpm: 450,
+                avg_kp_percent: 0.65,
+                data_source: "oracles_elixir",
+                data_years: "2024 (45 matches), 2025 (12 matches)",
+                map_range: [1],
+                maps_played: 1,
+                map_range_warning: "",
+                total_matches_available: 57,
+                matches_in_range: 57,
+                recent_matches: [
+                    {
+                        match_id: "LCS2025_001",
+                        champion: "Kai'Sa",
+                        kills: 5,
+                        deaths: 5,
+                        assists: 3,
+                        cs: 280,
+                        gold: 12000,
+                        damage_dealt: 25000,
+                        vision_score: 25,
+                        win: false,
+                        team_position: "ADC",
+                        game_duration: 1800,
+                        map_number: 1,
+                        side: "blue",
+                        match_date: "2025-01-15",
+                        team_name: "T1",
+                        opponent: "Gen.G",
+                        league: "LCS",
+                        data_year: "2025"
+                    },
+                    {
+                        match_id: "LCS2025_002",
+                        champion: "Ashe",
+                        kills: 3,
+                        deaths: 3,
+                        assists: 6,
+                        cs: 290,
+                        gold: 11500,
+                        damage_dealt: 22000,
+                        vision_score: 30,
+                        win: false,
+                        team_position: "ADC",
+                        game_duration: 1750,
+                        map_number: 1,
+                        side: "red",
+                        match_date: "2025-01-10",
+                        team_name: "T1",
+                        opponent: "KT Rolster",
+                        league: "LCS",
+                        data_year: "2025"
+                    }
+                ]
+            },
+            model_mode: "primary",
+            rule_override: false,
+            scaler_status: "loaded",
+            data_source: "model_prediction",
+            prediction_time_ms: 4
+        };
+
+        // Display sample data
+        document.getElementById('sample-data').textContent = JSON.stringify(samplePrediction, null, 2);
+
+        async function handleCopyAsJson() {
+            try {
+                // Create a clean JSON object with all prediction data
+                const jsonData = {
+                    prediction: samplePrediction.prediction,
+                    confidence: samplePrediction.confidence,
+                    reasoning: samplePrediction.reasoning,
+                    prop_request: samplePrediction.prop_request,
+                    player_stats: samplePrediction.player_stats,
+                    model_mode: samplePrediction.model_mode,
+                    rule_override: samplePrediction.rule_override,
+                    scaler_status: samplePrediction.scaler_status,
+                    data_source: samplePrediction.data_source,
+                    prediction_time_ms: samplePrediction.prediction_time_ms,
+                    generated_at: new Date().toISOString()
+                };
+                
+                const jsonString = JSON.stringify(jsonData, null, 2);
+                await navigator.clipboard.writeText(jsonString);
+                
+                // Show success feedback
+                const button = document.getElementById('copy-json-btn');
+                button.textContent = '✅ Copied!';
+                button.classList.add('success');
+                
+                // Display the copied data
+                document.getElementById('copied-data').textContent = jsonString;
+                
+                setTimeout(() => {
+                    button.textContent = 'Copy as JSON';
+                    button.classList.remove('success');
+                }, 2000);
+                
+                console.log('JSON copied to clipboard:', jsonString);
+            } catch (error) {
+                console.error('Failed to copy JSON:', error);
+                alert('Failed to copy JSON to clipboard');
+            }
+        }
+    </script>
+</body>
+</html> 

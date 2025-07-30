@@ -10,6 +10,13 @@ function App() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showResults, setShowResults] = useState(false);
   const [availableTeams, setAvailableTeams] = useState<string[]>([]);
+  const [verboseMode, setVerboseMode] = useState(false);
+  
+  // NEW: Statistical analysis state
+  const [statisticalData, setStatisticalData] = useState<any>(null);
+  const [isLoadingStats, setIsLoadingStats] = useState(false);
+  const [showStatisticalAnalysis, setShowStatisticalAnalysis] = useState(false);
+  const [rangeStd, setRangeStd] = useState(5.0);
 
   // Load available teams on component mount
   useEffect(() => {
@@ -98,12 +105,13 @@ function App() {
       opponent: formData.get('opponent') as string,
       map_range: mapRange,
       start_map: startMap,
-      end_map: endMap
+      end_map: endMap,
+      verbose: verboseMode // Include verbose mode
     };
 
     setIsSubmitting(true);
     try {
-      const response = await fetch('http://localhost:8000/api/v1/predict', {
+      const response = await fetch(`http://localhost:8000/api/v1/predict?verbose=${verboseMode}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -115,7 +123,22 @@ function App() {
         const result = await response.json();
         setPrediction(result);
         // Trigger the slide animation after a brief delay
-        setTimeout(() => setShowResults(true), 100);
+        setTimeout(() => {
+          setShowResults(true);
+          // Smooth scroll to results
+          setTimeout(() => {
+            const resultsElement = document.getElementById('prediction-results');
+            if (resultsElement) {
+              resultsElement.scrollIntoView({ 
+                behavior: 'smooth', 
+                block: 'start' 
+              });
+            }
+          }, 100);
+        }, 100);
+        
+        // NEW: Fetch statistical analysis in background
+        fetchStatisticalAnalysis(predictionData);
       } else {
         const error = await response.json();
         alert(`Error: ${error.detail?.message || 'Failed to make prediction'}`);
@@ -127,10 +150,77 @@ function App() {
     }
   };
 
+  // NEW: Statistical analysis functions
+  const fetchStatisticalAnalysis = async (predictionData: any) => {
+    setIsLoadingStats(true);
+    try {
+      // Get comprehensive statistical analysis
+      const response = await fetch(`http://localhost:8000/api/v1/statistics/comprehensive?range_std=${rangeStd}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(predictionData)
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        setStatisticalData(result);
+        setShowStatisticalAnalysis(true);
+      } else {
+        const error = await response.json();
+        console.error('Statistical analysis error:', error);
+        // Don't show alert, just log the error
+      }
+    } catch (error) {
+      console.error('Network error in statistical analysis:', error);
+    } finally {
+      setIsLoadingStats(false);
+    }
+  };
+
+  const fetchProbabilityDistribution = async (predictionData: any) => {
+    try {
+      const response = await fetch(`http://localhost:8000/api/v1/statistics/probability-distribution?range_std=${rangeStd}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(predictionData)
+      });
+
+      if (response.ok) {
+        return await response.json();
+      }
+    } catch (error) {
+      console.error('Error fetching probability distribution:', error);
+    }
+    return null;
+  };
+
+  const fetchStatisticalInsights = async (predictionData: any) => {
+    try {
+      const response = await fetch('http://localhost:8000/api/v1/statistics/insights', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(predictionData)
+      });
+
+      if (response.ok) {
+        return await response.json();
+      }
+    } catch (error) {
+      console.error('Error fetching statistical insights:', error);
+    }
+    return null;
+  };
+
   const getConfidenceColor = (confidence: number) => {
-    if (confidence >= 80) return 'text-green-600 bg-green-100';
-    if (confidence >= 60) return 'text-yellow-600 bg-yellow-100';
-    return 'text-red-600 bg-red-100';
+    if (confidence >= 80) return 'text-blue-600 bg-blue-100';
+    if (confidence >= 60) return 'text-blue-600 bg-blue-100';
+    return 'text-gray-600 bg-gray-100';
   };
 
   const getConfidenceLabel = (confidence: number) => {
@@ -144,11 +234,56 @@ function App() {
     setPrediction(null);
     setSelectedPlayer('');
     setSearchQuery('');
+    // NEW: Reset statistical analysis data
+    setStatisticalData(null);
+    setShowStatisticalAnalysis(false);
     setTimeout(() => {
       // Reset form
       const form = document.querySelector('form') as HTMLFormElement;
       if (form) form.reset();
     }, 300);
+  };
+
+  const handleCopyAsJson = async () => {
+    if (!prediction) return;
+    
+    try {
+      // Create a clean JSON object with all prediction data
+      const jsonData = {
+        prediction: prediction.prediction,
+        confidence: prediction.confidence,
+        reasoning: prediction.reasoning,
+        prop_request: prediction.prop_request,
+        player_stats: prediction.player_stats,
+        model_mode: prediction.model_mode,
+        rule_override: prediction.rule_override,
+        scaler_status: prediction.scaler_status,
+        data_source: prediction.data_source,
+        prediction_time_ms: prediction.prediction_time_ms,
+        generated_at: new Date().toISOString()
+      };
+      
+      const jsonString = JSON.stringify(jsonData, null, 2);
+      await navigator.clipboard.writeText(jsonString);
+      
+      // Show success feedback
+      const button = document.getElementById('copy-json-btn');
+      if (button) {
+        const originalText = button.textContent;
+        button.textContent = '✅ Copied!';
+        button.classList.add('bg-green-500', 'hover:bg-green-600');
+        button.classList.remove('bg-blue-500', 'hover:bg-blue-600');
+        
+        setTimeout(() => {
+          button.textContent = originalText;
+          button.classList.remove('bg-green-500', 'hover:bg-green-600');
+          button.classList.add('bg-blue-500', 'hover:bg-blue-600');
+        }, 2000);
+      }
+    } catch (error) {
+      console.error('Failed to copy JSON:', error);
+      alert('Failed to copy JSON to clipboard');
+    }
   };
 
   return (
@@ -179,14 +314,10 @@ function App() {
           </div>
 
           {/* Main Content */}
-          <div className={`transition-all duration-700 ease-in-out ${
-            showResults ? 'grid grid-cols-1 lg:grid-cols-2 gap-8' : 'flex justify-center'
-          }`}>
+          <div className="transition-all duration-700 ease-in-out">
             
             {/* Prediction Form */}
-            <div className={`transition-all duration-700 ease-in-out ${
-              showResults ? 'lg:col-span-1' : 'w-full max-w-2xl'
-            }`}>
+            <div className="w-full max-w-2xl mx-auto">
               <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-2xl p-8 border border-white/20">
                 <div className="text-center mb-8">
                   <h2 className="text-3xl font-bold text-gray-900 mb-2">
@@ -317,6 +448,20 @@ function App() {
                     </p>
                   </div>
 
+                  {/* Verbose Mode Toggle */}
+                  <div className="flex items-center justify-center">
+                    <input
+                      type="checkbox"
+                      id="verbose-toggle"
+                      checked={verboseMode}
+                      onChange={(e) => setVerboseMode(e.target.checked)}
+                      className="mr-2 h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                    />
+                    <label htmlFor="verbose-toggle" className="text-sm text-gray-700">
+                      Show Verbose Prediction
+                    </label>
+                  </div>
+
                   {/* Submit Button */}
                   <button
                     type="submit"
@@ -336,12 +481,12 @@ function App() {
               </div>
             </div>
 
-            {/* Prediction Results */}
+            {/* Prediction Results - Now appears below */}
             {prediction && (
-              <div className={`transition-all duration-700 ease-in-out ${
-                showResults ? 'lg:col-span-1 opacity-100 translate-x-0' : 'opacity-0 translate-x-full'
-              }`}>
-                <div className="bg-white/95 backdrop-blur-sm rounded-2xl shadow-2xl p-8 border border-white/20">
+              <div className={`transition-all duration-700 ease-in-out mt-8 ${
+                showResults ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-8'
+              }`} id="prediction-results">
+                <div className="w-full max-w-6xl mx-auto bg-white/95 backdrop-blur-sm rounded-2xl shadow-2xl p-8 border border-white/20">
                   <div className="flex justify-between items-center mb-6">
                     <h2 className="text-3xl font-bold text-gray-900">
                       Prediction Results
@@ -357,7 +502,7 @@ function App() {
                   <div className="space-y-8">
                     {/* Main Prediction */}
                     <div className="text-center">
-                      <div className={`inline-flex items-center px-6 py-3 rounded-full text-2xl font-bold ${prediction.prediction === 'MORE' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                      <div className={`inline-flex items-center px-6 py-3 rounded-full text-2xl font-bold ${prediction.prediction === 'MORE' ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-800'}`}>
                         {prediction.prediction === 'MORE' ? 'OVER' : 'UNDER'}
                       </div>
                       <p className="text-lg text-gray-600 mt-3">
@@ -369,6 +514,41 @@ function App() {
                         </p>
                       )}
                     </div>
+
+                    {/* Prop Request Details */}
+                    {verboseMode && prediction.prop_request && (
+                      <div className="bg-gray-50/80 backdrop-blur-sm p-6 rounded-xl">
+                        <h3 className="font-semibold text-gray-800 mb-3 text-lg">Prop Request Details</h3>
+                        <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
+                          <div className="text-center">
+                            <div className="font-medium text-gray-600">Prop Type</div>
+                            <div className="text-gray-700 capitalize">{prediction.prop_request.prop_type}</div>
+                          </div>
+                          <div className="text-center">
+                            <div className="font-medium text-gray-600">Prop Value</div>
+                            <div className="text-gray-700">{prediction.prop_request.prop_value}</div>
+                          </div>
+                          <div className="text-center">
+                            <div className="font-medium text-gray-600">Map Range</div>
+                            <div className="text-gray-700">
+                              {prediction.prop_request.map_range?.join('-') || '1'}
+                            </div>
+                          </div>
+                          {prediction.prop_request.opponent && (
+                            <div className="text-center">
+                              <div className="font-medium text-gray-600">Opponent</div>
+                              <div className="text-gray-700">{prediction.prop_request.opponent}</div>
+                            </div>
+                          )}
+                          {prediction.prop_request.tournament && (
+                            <div className="text-center">
+                              <div className="font-medium text-gray-600">Tournament</div>
+                              <div className="text-gray-700">{prediction.prop_request.tournament}</div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
 
                     {/* Confidence */}
                     <div className="text-center">
@@ -383,6 +563,87 @@ function App() {
                       <p className="text-gray-700 leading-relaxed">{prediction.reasoning}</p>
                     </div>
 
+                    {/* Model Transparency Section */}
+                    <div className="bg-blue-50/80 backdrop-blur-sm p-6 rounded-xl">
+                      <h3 className="font-semibold text-gray-800 mb-3 text-lg">Model Information</h3>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                        <div className="text-center">
+                          <div className="font-medium text-blue-600">Model Mode</div>
+                          <div className="text-gray-700 capitalize">{prediction.model_mode || 'primary'}</div>
+                        </div>
+                        <div className="text-center">
+                          <div className="font-medium text-blue-600">Rule Override</div>
+                          <div className="text-gray-700">{prediction.rule_override ? 'Yes' : 'No'}</div>
+                        </div>
+                        <div className="text-center">
+                          <div className="font-medium text-blue-600">Scaler Status</div>
+                          <div className="text-gray-700 capitalize">{prediction.scaler_status || 'unknown'}</div>
+                        </div>
+                        <div className="text-center">
+                          <div className="font-medium text-blue-600">Data Source</div>
+                          <div className="text-gray-700 capitalize">{prediction.data_source || 'unknown'}</div>
+                        </div>
+                      </div>
+                      {prediction.rule_override && (
+                        <div className="mt-3 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                          <p className="text-sm text-yellow-800">
+                            <strong>Rule Override Applied:</strong> Recent form significantly differs from prop value, 
+                            triggering conservative prediction adjustment.
+                          </p>
+                        </div>
+                      )}
+                      {prediction.scaler_status === 'missing' && (
+                        <div className="mt-3 p-3 bg-orange-50 border border-orange-200 rounded-lg">
+                          <p className="text-sm text-orange-800">
+                            <strong>Scaler Warning:</strong> Using unscaled features may affect prediction reliability.
+                          </p>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Confidence Breakdown */}
+                    <div className="bg-blue-50/80 backdrop-blur-sm p-6 rounded-xl">
+                      <h3 className="font-semibold text-gray-800 mb-3 text-lg">Confidence Analysis</h3>
+                      <div className="space-y-3">
+                        <div className="flex justify-between items-center">
+                          <span className="text-sm font-medium text-gray-600">Base Confidence</span>
+                          <span className="text-sm text-gray-700">
+                            {prediction.confidence.toFixed(1)}%
+                          </span>
+                        </div>
+                        {prediction.player_stats?.matches_in_range && prediction.player_stats.matches_in_range < 3 && (
+                          <div className="flex justify-between items-center">
+                            <span className="text-sm font-medium text-blue-600">Limited Data Penalty</span>
+                            <span className="text-sm text-blue-700">
+                              {prediction.player_stats.matches_in_range} matches in range
+                            </span>
+                          </div>
+                        )}
+                        {prediction.player_stats?.recent_matches && (
+                          <div className="flex justify-between items-center">
+                            <span className="text-sm font-medium text-gray-600">Recent Volatility</span>
+                            <span className="text-sm text-gray-700">
+                              {(() => {
+                                const recentKills = prediction.player_stats.recent_matches.slice(0, 5).map((m: any) => m.kills);
+                                const mean = recentKills.reduce((a: number, b: number) => a + b, 0) / recentKills.length;
+                                const variance = recentKills.reduce((acc: number, val: number) => acc + Math.pow(val - mean, 2), 0) / recentKills.length;
+                                const cv = (Math.sqrt(variance) / mean * 100).toFixed(1);
+                                return `${cv}% CV`;
+                              })()}
+                            </span>
+                          </div>
+                        )}
+                        {prediction.player_stats?.win_rate && (
+                          <div className="flex justify-between items-center">
+                            <span className="text-sm font-medium text-gray-600">Recent Win Rate</span>
+                            <span className="text-sm text-gray-700">
+                              {(prediction.player_stats.win_rate * 100).toFixed(1)}%
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
                     {/* Player Stats Summary */}
                     {prediction.player_stats && (
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -390,18 +651,65 @@ function App() {
                           <div className="text-3xl font-bold text-blue-600">{prediction.player_stats.avg_kills?.toFixed(1) || '0.0'}</div>
                           <div className="text-sm text-blue-600">Avg Kills</div>
                         </div>
-                        <div className="bg-green-50/80 backdrop-blur-sm p-4 rounded-xl text-center">
-                          <div className="text-3xl font-bold text-green-600">{prediction.player_stats.avg_assists?.toFixed(1) || '0.0'}</div>
-                          <div className="text-sm text-green-600">Avg Assists</div>
+                        <div className="bg-blue-50/80 backdrop-blur-sm p-4 rounded-xl text-center">
+                          <div className="text-3xl font-bold text-blue-600">{prediction.player_stats.avg_assists?.toFixed(1) || '0.0'}</div>
+                          <div className="text-sm text-blue-600">Avg Assists</div>
                         </div>
-                        <div className="bg-purple-50/80 backdrop-blur-sm p-4 rounded-xl text-center">
-                          <div className="text-3xl font-bold text-purple-600">{prediction.player_stats.avg_cs?.toFixed(0) || '0'}</div>
-                          <div className="text-sm text-purple-600">Avg CS</div>
+                        <div className="bg-blue-50/80 backdrop-blur-sm p-4 rounded-xl text-center">
+                          <div className="text-3xl font-bold text-blue-600">{prediction.player_stats.avg_cs?.toFixed(0) || '0'}</div>
+                          <div className="text-sm text-blue-600">Avg CS</div>
                         </div>
-                        <div className="bg-orange-50/80 backdrop-blur-sm p-4 rounded-xl text-center">
-                          <div className="text-3xl font-bold text-orange-600">{prediction.player_stats.win_rate?.toFixed(1) || '0.0'}%</div>
-                          <div className="text-sm text-orange-600">Win Rate</div>
+                        <div className="bg-blue-50/80 backdrop-blur-sm p-4 rounded-xl text-center">
+                          <div className="text-3xl font-bold text-blue-600">{(prediction.player_stats.win_rate * 100)?.toFixed(1) || '0.0'}%</div>
+                          <div className="text-sm text-blue-600">Win Rate</div>
                         </div>
+                      </div>
+                    )}
+
+                    {/* Additional Player Stats */}
+                    {prediction.player_stats && (
+                      <div className="bg-gray-50/80 backdrop-blur-sm p-6 rounded-xl">
+                        <h3 className="font-semibold text-gray-800 mb-3 text-lg">Detailed Statistics</h3>
+                        <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
+                          <div className="text-center">
+                            <div className="font-medium text-gray-600">Recent Kills Avg</div>
+                            <div className="text-lg font-bold text-gray-800">{prediction.player_stats.recent_kills_avg?.toFixed(1) || '0.0'}</div>
+                          </div>
+                          <div className="text-center">
+                            <div className="font-medium text-gray-600">Recent Assists Avg</div>
+                            <div className="text-lg font-bold text-gray-800">{prediction.player_stats.recent_assists_avg?.toFixed(1) || '0.0'}</div>
+                          </div>
+                          <div className="text-center">
+                            <div className="font-medium text-gray-600">Recent CS Avg</div>
+                            <div className="text-lg font-bold text-gray-800">{prediction.player_stats.recent_cs_avg?.toFixed(0) || '0'}</div>
+                          </div>
+                          <div className="text-center">
+                            <div className="font-medium text-gray-600">Avg KDA</div>
+                            <div className="text-lg font-bold text-gray-800">{prediction.player_stats.avg_kda?.toFixed(2) || '0.00'}</div>
+                          </div>
+                          <div className="text-center">
+                            <div className="font-medium text-gray-600">Avg GPM</div>
+                            <div className="text-lg font-bold text-gray-800">{prediction.player_stats.avg_gpm?.toFixed(0) || '0'}</div>
+                          </div>
+                          <div className="text-center">
+                            <div className="font-medium text-gray-600">KP %</div>
+                            <div className="text-lg font-bold text-gray-800">{(prediction.player_stats.avg_kp_percent * 100)?.toFixed(1) || '0.0'}%</div>
+                          </div>
+                        </div>
+                        {prediction.player_stats.data_years && (
+                          <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                            <p className="text-sm text-blue-800">
+                              <strong>Data Coverage:</strong> {prediction.player_stats.data_years}
+                            </p>
+                          </div>
+                        )}
+                        {prediction.player_stats.map_range_warning && (
+                          <div className="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                            <p className="text-sm text-yellow-800">
+                              <strong>Map Range Note:</strong> {prediction.player_stats.map_range_warning}
+                            </p>
+                          </div>
+                        )}
                       </div>
                     )}
 
@@ -417,9 +725,9 @@ function App() {
                                   {match.champion || 'Unknown'}
                                 </span>
                                 <span className={`px-2 py-1 rounded text-xs font-medium ${
-                                  match.result === 1 ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                                  match.win === true ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-800'
                                 }`}>
-                                  {match.result === 1 ? 'W' : 'L'}
+                                  {match.win === true ? 'W' : 'L'}
                                 </span>
                               </div>
                               <div className="text-sm text-gray-600">
@@ -438,6 +746,187 @@ function App() {
                         <p>Generated in {(prediction.prediction_time_ms / 1000).toFixed(3)}s</p>
                       )}
                     </div>
+
+                    {/* Verbose Mode Details */}
+                    {verboseMode && prediction.features_used && (
+                      <div className="bg-blue-50/80 backdrop-blur-sm p-6 rounded-xl">
+                        <h3 className="font-semibold text-gray-800 mb-3 text-lg">Model Details</h3>
+                        <div className="space-y-3">
+                          <div className="flex justify-between items-center">
+                            <span className="text-sm font-medium text-gray-600">Features Used</span>
+                            <span className="text-sm text-gray-700">{prediction.features_used.length} engineered features</span>
+                          </div>
+                          <div className="flex justify-between items-center">
+                            <span className="text-sm font-medium text-gray-600">Model Type</span>
+                            <span className="text-sm text-gray-700 capitalize">{prediction.model_mode || 'primary'}</span>
+                          </div>
+                          {prediction.champion_stats && (
+                            <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                              <p className="text-sm text-blue-800">
+                                <strong>Champion Analysis:</strong> {prediction.champion_stats.unique_champions || 0} unique champions, 
+                                {prediction.champion_stats.champion_diversity ? ` ${(prediction.champion_stats.champion_diversity * 100).toFixed(1)}%` : ' 0%'} diversity
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Copy as JSON Button */}
+                    <div className="text-center">
+                      <button
+                        id="copy-json-btn"
+                        onClick={handleCopyAsJson}
+                        className="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg transition-colors"
+                      >
+                        Copy as JSON
+                      </button>
+                    </div>
+
+                    {/* NEW: Statistical Analysis Section */}
+                    {statisticalData && (
+                      <div className="bg-gradient-to-r from-blue-50 to-gray-50 backdrop-blur-sm p-6 rounded-xl">
+                        <h3 className="font-semibold text-gray-800 mb-3 text-lg">Statistical Analysis</h3>
+                        
+                        {/* Confidence Difference Explanation */}
+                        <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                          <p className="text-sm text-blue-800">
+                            <strong>Note:</strong> Statistical confidence values shown below are calculated using pure statistical methods 
+                            and may differ from the main prediction confidence, which includes additional risk factors (volatility, 
+                            rule overrides, data quality penalties).
+                          </p>
+                        </div>
+
+                        {statisticalData.summary_stats && (
+                          <div className="bg-blue-50/80 backdrop-blur-sm p-6 rounded-xl">
+                            <h4 className="font-semibold text-gray-800 mb-3">Summary Statistics</h4>
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                              <div className="text-center">
+                                <div className="font-medium text-blue-600">Recent Average</div>
+                                <div className="text-lg font-bold text-blue-800">{statisticalData.summary_stats.mean_recent}</div>
+                              </div>
+                              <div className="text-center">
+                                <div className="font-medium text-blue-600">Std Deviation</div>
+                                <div className="text-lg font-bold text-blue-800">{statisticalData.summary_stats.std_recent}</div>
+                              </div>
+                              <div className="text-center">
+                                <div className="font-medium text-blue-600">Z-Score</div>
+                                <div className="text-lg font-bold text-blue-800">{statisticalData.summary_stats.input_z_score}</div>
+                              </div>
+                              <div className="text-center">
+                                <div className="font-medium text-blue-600">Range Analyzed</div>
+                                <div className="text-lg font-bold text-blue-800">{statisticalData.summary_stats.range_analyzed}</div>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Probability Distribution */}
+                        {statisticalData.probability_distribution && (
+                          <div className="bg-gray-50/80 backdrop-blur-sm p-6 rounded-xl">
+                            <h4 className="font-semibold text-gray-800 mb-3">Probability Distribution</h4>
+                            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 max-h-60 overflow-y-auto">
+                              {Object.entries(statisticalData.probability_distribution)
+                                .sort(([a], [b]) => parseInt(a) - parseInt(b))
+                                .map(([value, data]: [string, any]) => (
+                                  <div key={value} className="bg-white p-3 rounded-lg border">
+                                    <div className="text-center">
+                                      <div className="font-bold text-lg">{value}</div>
+                                      <div className={`text-sm font-medium ${
+                                        data.prediction === 'MORE' ? 'text-blue-600' : 'text-gray-600'
+                                      }`}>
+                                        {data.prediction}
+                                      </div>
+                                      <div className="text-xs text-gray-600">
+                                        {data.confidence}% confidence
+                                      </div>
+                                      <div className="text-xs text-gray-500 mt-1">
+                                        MORE: {data.probability_more}% | LESS: {data.probability_less}%
+                                      </div>
+                                      {data.statistical_significance === 'high' && (
+                                        <div className="text-xs text-blue-600 font-medium mt-1">High Significance</div>
+                                      )}
+                                    </div>
+                                  </div>
+                                ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Statistical Insights */}
+                        {statisticalData.statistical_insights && (
+                          <div className="bg-blue-50/80 backdrop-blur-sm p-6 rounded-xl">
+                            <h4 className="font-semibold text-gray-800 mb-3">Statistical Insights</h4>
+                            <div className="space-y-4">
+                              {/* Z-Score and Significance */}
+                              <div className="grid grid-cols-2 gap-4">
+                                <div className="bg-white p-3 rounded-lg">
+                                  <div className="text-sm font-medium text-gray-600">Z-Score</div>
+                                  <div className="text-lg font-bold text-gray-800">{statisticalData.statistical_insights.statistical_measures.z_score}</div>
+                                </div>
+                                <div className="bg-white p-3 rounded-lg">
+                                  <div className="text-sm font-medium text-gray-600">Percentile</div>
+                                  <div className="text-lg font-bold text-gray-800">{statisticalData.statistical_insights.statistical_measures.percentile}%</div>
+                                </div>
+                              </div>
+
+                              {/* Probability Analysis */}
+                              <div className="bg-white p-4 rounded-lg">
+                                <div className="text-sm font-medium text-gray-600 mb-2">Probability Analysis</div>
+                                <div className="grid grid-cols-2 gap-4">
+                                  <div>
+                                    <div className="text-sm text-gray-500">MORE Probability</div>
+                                    <div className="text-lg font-bold text-blue-600">{statisticalData.statistical_insights.probability_analysis.probability_more}%</div>
+                                  </div>
+                                  <div>
+                                    <div className="text-sm text-gray-500">LESS Probability</div>
+                                    <div className="text-lg font-bold text-gray-600">{statisticalData.statistical_insights.probability_analysis.probability_less}%</div>
+                                  </div>
+                                </div>
+                                <div className="mt-2 text-sm text-gray-600">
+                                  Recommended: <span className="font-medium">{statisticalData.statistical_insights.probability_analysis.recommended_prediction}</span>
+                                </div>
+                              </div>
+
+                              {/* Confidence Intervals */}
+                              {statisticalData.statistical_insights.confidence_intervals && (
+                                <div className="bg-white p-4 rounded-lg">
+                                  <div className="text-sm font-medium text-gray-600 mb-2">95% Confidence Interval</div>
+                                  <div className="text-lg font-bold text-gray-800">
+                                    [{statisticalData.statistical_insights.confidence_intervals['95_percent'].lower}, {statisticalData.statistical_insights.confidence_intervals['95_percent'].upper}]
+                                  </div>
+                                  <div className="text-sm text-gray-500">
+                                    Width: {statisticalData.statistical_insights.confidence_intervals['95_percent'].width}
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Volatility Metrics */}
+                              {statisticalData.statistical_insights.volatility_metrics && (
+                                <div className="bg-white p-4 rounded-lg">
+                                  <div className="text-sm font-medium text-gray-600 mb-2">Volatility Analysis</div>
+                                  <div className="text-lg font-bold text-gray-800">
+                                    {statisticalData.statistical_insights.volatility_metrics.volatility_percentage}% CV
+                                  </div>
+                                  <div className="text-sm text-gray-500">
+                                    {statisticalData.statistical_insights.volatility_metrics.high_volatility ? 'High' : 
+                                     statisticalData.statistical_insights.volatility_metrics.moderate_volatility ? 'Moderate' : 'Low'} Volatility
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Loading State */}
+                        {isLoadingStats && (
+                          <div className="text-center py-4">
+                            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
+                            <p className="text-sm text-gray-600 mt-2">Loading statistical analysis...</p>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>

@@ -23,12 +23,12 @@ def create_map_index_column(df: pd.DataFrame) -> pd.DataFrame:
     df_copy = df.copy()
     
     # For Oracle's Elixir format, gameid is like "LOLTMNT03_179647"
-    # We'll use the full gameid as match_series since each gameid represents a unique match
-    df_copy['match_series'] = df_copy['gameid']
+    # Extract the series identifier (before the underscore)
+    df_copy['match_series'] = df_copy['gameid'].str.split('_').str[0]
     
-    # Create map index - since each gameid is unique, all maps will have index 1
-    # This is a simplified approach for the current data structure
-    df_copy['map_index_within_series'] = 1
+    # Create map index within each series
+    # Group by match_series and assign sequential map indices
+    df_copy['map_index_within_series'] = df_copy.groupby('match_series')['gameid'].rank(method='dense').astype(int)
     
     return df_copy
 
@@ -83,6 +83,10 @@ def aggregate_stats_by_map_range(df: pd.DataFrame, map_range: List[int],
     
     # Add count of maps played
     agg_dict['map_index_within_series'] = 'count'
+    
+    # Add date column (take the most recent date from the series)
+    if 'date' in filtered_df.columns:
+        agg_dict['date'] = 'max'  # Use the most recent date from the series
     
     return filtered_df.groupby(group_cols).agg(agg_dict).reset_index()
 
