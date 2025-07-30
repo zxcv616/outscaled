@@ -11,9 +11,31 @@ import logging
 # Configure logging
 logger = logging.getLogger(__name__)
 
-# Initialize components
-data_fetcher = DataFetcher()
-predictor = PropPredictor()
+# Initialize components lazily
+_data_fetcher = None
+_predictor = None
+
+def get_data_fetcher():
+    global _data_fetcher
+    if _data_fetcher is None:
+        try:
+            _data_fetcher = DataFetcher()
+            logger.info("DataFetcher initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize DataFetcher: {e}")
+            raise HTTPException(status_code=500, detail="Data service unavailable")
+    return _data_fetcher
+
+def get_predictor():
+    global _predictor
+    if _predictor is None:
+        try:
+            _predictor = PropPredictor()
+            logger.info("PropPredictor initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize PropPredictor: {e}")
+            raise HTTPException(status_code=500, detail="Prediction service unavailable")
+    return _predictor
 
 router = APIRouter()
 
@@ -30,7 +52,7 @@ def search_players(query: str = "", limit: int = 10, db: Session = Depends(get_d
             return {"players": [], "message": "Please provide a search query with at least 2 characters"}
         
         # Get all available players
-        all_players = data_fetcher.get_available_players()
+        all_players = get_data_fetcher().get_available_players()
         
         # Filter players based on query (case-insensitive)
         query_lower = query.lower()
@@ -69,7 +91,7 @@ def get_available_teams(db: Session = Depends(get_db)):
     """Get all available teams from the dataset"""
     try:
         # Get all available teams from the dataset
-        all_teams = data_fetcher.get_available_teams()
+        all_teams = get_data_fetcher().get_available_teams()
         
         return {
             "teams": all_teams,
@@ -84,7 +106,7 @@ def get_popular_players(limit: int = 20, db: Session = Depends(get_db)):
     """Get popular players (players with most matches)"""
     try:
         # Get all players and their match counts
-        all_players = data_fetcher.get_available_players()
+        all_players = get_data_fetcher().get_available_players()
         
         # For now, return first N players as "popular"
         # In a real implementation, you'd sort by match count
@@ -103,7 +125,7 @@ def validate_player(player_name: str, db: Session = Depends(get_db)):
     """Validate if a player exists in the dataset"""
     try:
         # Get all available players
-        all_players = data_fetcher.get_available_players()
+        all_players = get_data_fetcher().get_available_players()
         
         # Check if player exists (case-insensitive)
         player_exists = any(
@@ -148,7 +170,7 @@ async def predict_prop(prop_request: PropRequest, verbose: bool = False, db: Ses
     """Make a prediction for a prop"""
     try:
         # Validate player exists first
-        all_players = data_fetcher.get_available_players()
+        all_players = get_data_fetcher().get_available_players()
         
         player_exists = any(
             player.lower() == prop_request.player_name.lower() 
@@ -179,7 +201,7 @@ async def predict_prop(prop_request: PropRequest, verbose: bool = False, db: Ses
         map_range = prop_request.map_range if prop_request.map_range else [1]
         
         # Get player stats with map range
-        player_stats = data_fetcher.get_player_stats(
+        player_stats = get_data_fetcher().get_player_stats(
             prop_request.player_name, 
             db, 
             map_range=map_range
@@ -190,7 +212,7 @@ async def predict_prop(prop_request: PropRequest, verbose: bool = False, db: Ses
         prop_request_dict["map_range"] = map_range
         
         # Make prediction with verbose parameter
-        prediction_result = predictor.predict(player_stats, prop_request_dict, verbose=verbose)
+        prediction_result = get_predictor().predict(player_stats, prop_request_dict, verbose=verbose)
         
         # Add player stats to response
         prediction_result["player_stats"] = player_stats
@@ -212,7 +234,7 @@ async def predict_prop(prop_request: PropRequest, verbose: bool = False, db: Ses
 async def get_player_stats(player_name: str, db: Session = Depends(get_db)):
     """Get player statistics"""
     try:
-        player_stats = data_fetcher.get_player_stats(player_name, db)
+        player_stats = get_data_fetcher().get_player_stats(player_name, db)
         
         # Create response with explicit fields
         response = PlayerStatsResponse(
@@ -241,7 +263,7 @@ async def get_player_stats(player_name: str, db: Session = Depends(get_db)):
 def get_model_info():
     """Get information about the current ML model"""
     try:
-        return predictor.get_model_info()
+        return get_predictor().get_model_info()
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error getting model info: {str(e)}")
 
@@ -249,7 +271,7 @@ def get_model_info():
 def get_feature_importance():
     """Get feature importance scores from the model"""
     try:
-        feature_importance = predictor.get_feature_importance()
+        feature_importance = get_predictor().get_feature_importance()
         return {
             "feature_importance": feature_importance,
             "total_features": len(feature_importance)
@@ -263,7 +285,7 @@ async def get_probability_distribution(prop_request: PropRequest, range_std: flo
     try:
         # Validate player exists
         player_name = prop_request.player_name
-        if not data_fetcher.player_exists(player_name):
+        if not get_data_fetcher().player_exists(player_name):
             raise HTTPException(status_code=404, detail=f"Player '{player_name}' not found in dataset")
         
         # Get player stats - use mock db to avoid database dependency
@@ -272,7 +294,7 @@ async def get_probability_distribution(prop_request: PropRequest, range_std: flo
                 pass
         
         mock_db = MockDB()
-        player_stats = data_fetcher.get_player_stats(
+        player_stats = get_data_fetcher().get_player_stats(
             player_name=player_name,
             db=mock_db,
             map_range=prop_request.map_range
@@ -282,7 +304,7 @@ async def get_probability_distribution(prop_request: PropRequest, range_std: flo
             raise HTTPException(status_code=404, detail=f"No data found for player '{player_name}'")
         
         # Calculate probability distribution
-        distribution_result = predictor.calculate_probability_distribution(
+        distribution_result = get_predictor().calculate_probability_distribution(
             player_stats=player_stats,
             prop_request=prop_request.dict(),
             range_std=range_std
@@ -312,7 +334,7 @@ async def get_statistical_insights(prop_request: PropRequest):
     try:
         # Validate player exists
         player_name = prop_request.player_name
-        if not data_fetcher.player_exists(player_name):
+        if not get_data_fetcher().player_exists(player_name):
             raise HTTPException(status_code=404, detail=f"Player '{player_name}' not found in dataset")
         
         # Get player stats - use mock db to avoid database dependency
@@ -321,7 +343,7 @@ async def get_statistical_insights(prop_request: PropRequest):
                 pass
         
         mock_db = MockDB()
-        player_stats = data_fetcher.get_player_stats(
+        player_stats = get_data_fetcher().get_player_stats(
             player_name=player_name,
             db=mock_db,
             map_range=prop_request.map_range
@@ -331,7 +353,7 @@ async def get_statistical_insights(prop_request: PropRequest):
             raise HTTPException(status_code=404, detail=f"No data found for player '{player_name}'")
         
         # Get statistical insights
-        insights_result = predictor.get_statistical_insights(
+        insights_result = get_predictor().get_statistical_insights(
             player_stats=player_stats,
             prop_request=prop_request.dict()
         )
@@ -361,7 +383,7 @@ async def get_comprehensive_statistics(prop_request: PropRequest, range_std: flo
     try:
         # Validate player exists
         player_name = prop_request.player_name
-        if not data_fetcher.player_exists(player_name):
+        if not get_data_fetcher().player_exists(player_name):
             raise HTTPException(status_code=404, detail=f"Player '{player_name}' not found in dataset")
         
         # Get player stats - use mock db to avoid database dependency
@@ -370,7 +392,7 @@ async def get_comprehensive_statistics(prop_request: PropRequest, range_std: flo
                 pass
         
         mock_db = MockDB()
-        player_stats = data_fetcher.get_player_stats(
+        player_stats = get_data_fetcher().get_player_stats(
             player_name=player_name,
             db=mock_db,
             map_range=prop_request.map_range
@@ -380,21 +402,21 @@ async def get_comprehensive_statistics(prop_request: PropRequest, range_std: flo
             raise HTTPException(status_code=404, detail=f"No data found for player '{player_name}'")
         
         # Get prediction
-        prediction_result = predictor.predict(
+        prediction_result = get_predictor().predict(
             player_stats=player_stats,
             prop_request=prop_request.dict(),
             verbose=True
         )
         
         # Get probability distribution
-        distribution_result = predictor.calculate_probability_distribution(
+        distribution_result = get_predictor().calculate_probability_distribution(
             player_stats=player_stats,
             prop_request=prop_request.dict(),
             range_std=range_std
         )
         
         # Get statistical insights
-        insights_result = predictor.get_statistical_insights(
+        insights_result = get_predictor().get_statistical_insights(
             player_stats=player_stats,
             prop_request=prop_request.dict()
         )

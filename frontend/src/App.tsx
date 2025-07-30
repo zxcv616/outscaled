@@ -797,25 +797,25 @@ function App() {
                           </p>
                         </div>
 
-                        {statisticalData.summary_stats && (
+                        {statisticalData?.summary_stats && (
                           <div className="bg-blue-50/80 backdrop-blur-sm p-6 rounded-xl">
                             <h4 className="font-semibold text-gray-800 mb-3">Summary Statistics</h4>
                             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                               <div className="text-center">
                                 <div className="font-medium text-blue-600">Recent Average</div>
-                                <div className="text-lg font-bold text-blue-800">{statisticalData.summary_stats.mean_recent}</div>
+                                <div className="text-lg font-bold text-blue-800">{statisticalData.summary_stats.mean_recent || 'N/A'}</div>
                               </div>
                               <div className="text-center">
                                 <div className="font-medium text-blue-600">Std Deviation</div>
-                                <div className="text-lg font-bold text-blue-800">{statisticalData.summary_stats.std_recent}</div>
+                                <div className="text-lg font-bold text-blue-800">{statisticalData.summary_stats.std_recent || 'N/A'}</div>
                               </div>
                               <div className="text-center">
                                 <div className="font-medium text-blue-600">Z-Score</div>
-                                <div className="text-lg font-bold text-blue-800">{statisticalData.summary_stats.input_z_score}</div>
+                                <div className="text-lg font-bold text-blue-800">{statisticalData.summary_stats.input_z_score || 'N/A'}</div>
                               </div>
                               <div className="text-center">
                                 <div className="font-medium text-blue-600">Range Analyzed</div>
-                                <div className="text-lg font-bold text-blue-800">{statisticalData.summary_stats.range_analyzed}</div>
+                                <div className="text-lg font-bold text-blue-800">{statisticalData.summary_stats.range_analyzed || 'N/A'}</div>
                               </div>
                             </div>
                           </div>
@@ -854,7 +854,7 @@ function App() {
                         )}
 
                         {/* Statistical Insights */}
-                        {statisticalData.statistical_insights && (
+                        {statisticalData?.statistical_insights && (
                           <div className="bg-blue-50/80 backdrop-blur-sm p-6 rounded-xl">
                             <h4 className="font-semibold text-gray-800 mb-3">Statistical Insights</h4>
                             <div className="space-y-4">
@@ -862,51 +862,63 @@ function App() {
                               <div className="grid grid-cols-2 gap-4">
                                 <div className="bg-white p-3 rounded-lg">
                                   <div className="text-sm font-medium text-gray-600">Z-Score</div>
-                                  <div className="text-lg font-bold text-gray-800">{statisticalData.statistical_insights.statistical_measures.z_score}</div>
+                                  <div className="text-lg font-bold text-gray-800">
+                                    {statisticalData.statistical_insights?.statistical_measures?.z_score || 'N/A'}
+                                  </div>
                                 </div>
                                 <div className="bg-white p-3 rounded-lg">
                                   <div className="text-sm font-medium text-gray-600">Percentile</div>
-                                  <div className="text-lg font-bold text-gray-800">{statisticalData.statistical_insights.statistical_measures.percentile}%</div>
+                                  <div className="text-lg font-bold text-gray-800">
+                                    {statisticalData.statistical_insights?.statistical_measures?.percentile || 'N/A'}%
+                                  </div>
                                 </div>
                               </div>
 
                               {/* Probability Analysis */}
-                              <div className="bg-white p-4 rounded-lg">
-                                <div className="text-sm font-medium text-gray-600 mb-2">Probability Analysis</div>
-                                <div className="grid grid-cols-2 gap-4">
-                                  <div>
-                                    <div className="text-sm text-gray-500">MORE Probability</div>
-                                    <div className="text-lg font-bold text-blue-600">{statisticalData.statistical_insights.probability_analysis.probability_more}%</div>
+                              {statisticalData.statistical_insights?.probability_analysis && (
+                                <div className="bg-white p-4 rounded-lg">
+                                  <div className="text-sm font-medium text-gray-600 mb-2">Probability Analysis</div>
+                                  <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                      <div className="text-sm text-gray-500">MORE Probability</div>
+                                      <div className="text-lg font-bold text-blue-600">
+                                        {statisticalData.statistical_insights.probability_analysis.probability_more || 'N/A'}%
+                                      </div>
+                                    </div>
+                                    <div>
+                                      <div className="text-sm text-gray-500">LESS Probability</div>
+                                      <div className="text-lg font-bold text-gray-600">
+                                        {statisticalData.statistical_insights.probability_analysis.probability_less || 'N/A'}%
+                                      </div>
+                                    </div>
                                   </div>
-                                  <div>
-                                    <div className="text-sm text-gray-500">LESS Probability</div>
-                                    <div className="text-lg font-bold text-gray-600">{statisticalData.statistical_insights.probability_analysis.probability_less}%</div>
+                                  <div className="mt-2 text-sm text-gray-600">
+                                    Recommended: <span className="font-medium">
+                                      {statisticalData.statistical_insights.probability_analysis.recommended_prediction || 'N/A'}
+                                    </span>
                                   </div>
                                 </div>
-                                <div className="mt-2 text-sm text-gray-600">
-                                  Recommended: <span className="font-medium">{statisticalData.statistical_insights.probability_analysis.recommended_prediction}</span>
-                                </div>
-                              </div>
+                              )}
 
                               {/* Confidence Intervals */}
-                              {statisticalData.statistical_insights.confidence_intervals && (
+                              {statisticalData.statistical_insights?.confidence_intervals && (
                                 <div className="bg-white p-4 rounded-lg">
                                   <div className="text-sm font-medium text-gray-600 mb-2">95% Confidence Interval</div>
                                   <div className="text-lg font-bold text-gray-800">
-                                    [{statisticalData.statistical_insights.confidence_intervals['95_percent'].lower}, {statisticalData.statistical_insights.confidence_intervals['95_percent'].upper}]
+                                    [{statisticalData.statistical_insights.confidence_intervals['95_percent']?.lower || 'N/A'}, {statisticalData.statistical_insights.confidence_intervals['95_percent']?.upper || 'N/A'}]
                                   </div>
                                   <div className="text-sm text-gray-500">
-                                    Width: {statisticalData.statistical_insights.confidence_intervals['95_percent'].width}
+                                    Width: {statisticalData.statistical_insights.confidence_intervals['95_percent']?.width || 'N/A'}
                                   </div>
                                 </div>
                               )}
 
                               {/* Volatility Metrics */}
-                              {statisticalData.statistical_insights.volatility_metrics && (
+                              {statisticalData.statistical_insights?.volatility_metrics && (
                                 <div className="bg-white p-4 rounded-lg">
                                   <div className="text-sm font-medium text-gray-600 mb-2">Volatility Analysis</div>
                                   <div className="text-lg font-bold text-gray-800">
-                                    {statisticalData.statistical_insights.volatility_metrics.volatility_percentage}% CV
+                                    {statisticalData.statistical_insights.volatility_metrics.volatility_percentage || 'N/A'}% CV
                                   </div>
                                   <div className="text-sm text-gray-500">
                                     {statisticalData.statistical_insights.volatility_metrics.high_volatility ? 'High' : 

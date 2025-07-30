@@ -222,9 +222,41 @@ class DataFetcher:
                 
                 # For win rate and other stats that need the original data structure
                 win_rate = (player_matches["result"] == 1).mean()
-                avg_kda = player_matches["kda"].mean()
-                avg_gpm = player_matches["gpm"].mean()
-                avg_kp_percent = player_matches["kp_percent"].mean()
+                
+                # Calculate KDA from kills, deaths, assists
+                kda_values = []
+                for _, row in player_matches.iterrows():
+                    kills = row.get("kills", 0)
+                    deaths = row.get("deaths", 0)
+                    assists = row.get("assists", 0)
+                    if deaths > 0:
+                        kda_values.append((kills + assists) / deaths)
+                    else:
+                        kda_values.append(kills + assists)  # Perfect KDA if no deaths
+                avg_kda = np.mean(kda_values) if kda_values else 0.0
+                
+                # Calculate GPM from earned gold and game length
+                gpm_values = []
+                for _, row in player_matches.iterrows():
+                    gold = row.get("earnedgold", 0)
+                    game_length = row.get("gamelength", 0)
+                    if game_length > 0:
+                        gpm_values.append(gold / (game_length / 60))  # Convert to minutes
+                    else:
+                        gpm_values.append(0)
+                avg_gpm = np.mean(gpm_values) if gpm_values else 0.0
+                
+                # Calculate KP% from team kills and player kills/assists
+                kp_values = []
+                for _, row in player_matches.iterrows():
+                    player_kills = row.get("kills", 0)
+                    player_assists = row.get("assists", 0)
+                    team_kills = row.get("teamkills", 0)
+                    if team_kills > 0:
+                        kp_values.append((player_kills + player_assists) / team_kills)
+                    else:
+                        kp_values.append(0)
+                avg_kp_percent = np.mean(kp_values) if kp_values else 0.0
                 
                 stats = {
                     "player_name": player_name,
@@ -258,6 +290,41 @@ class DataFetcher:
                 recent_assists_avg = recent_matches["assists"].head(5).mean() if not recent_matches.empty else 0.0
                 recent_cs_avg = recent_matches["total cs"].head(5).mean() if not recent_matches.empty else 0.0
                 
+                # Calculate KDA from kills, deaths, assists
+                kda_values = []
+                for _, row in player_matches_filtered.iterrows():
+                    kills = row.get("kills", 0)
+                    deaths = row.get("deaths", 0)
+                    assists = row.get("assists", 0)
+                    if deaths > 0:
+                        kda_values.append((kills + assists) / deaths)
+                    else:
+                        kda_values.append(kills + assists)  # Perfect KDA if no deaths
+                avg_kda = np.mean(kda_values) if kda_values else 0.0
+                
+                # Calculate GPM from earned gold and game length
+                gpm_values = []
+                for _, row in player_matches_filtered.iterrows():
+                    gold = row.get("earnedgold", 0)
+                    game_length = row.get("gamelength", 0)
+                    if game_length > 0:
+                        gpm_values.append(gold / (game_length / 60))  # Convert to minutes
+                    else:
+                        gpm_values.append(0)
+                avg_gpm = np.mean(gpm_values) if gpm_values else 0.0
+                
+                # Calculate KP% from team kills and player kills/assists
+                kp_values = []
+                for _, row in player_matches_filtered.iterrows():
+                    player_kills = row.get("kills", 0)
+                    player_assists = row.get("assists", 0)
+                    team_kills = row.get("teamkills", 0)
+                    if team_kills > 0:
+                        kp_values.append((player_kills + player_assists) / team_kills)
+                    else:
+                        kp_values.append(0)
+                avg_kp_percent = np.mean(kp_values) if kp_values else 0.0
+                
                 stats = {
                     "player_name": player_name,
                     "recent_matches": self._format_recent_matches(recent_matches),
@@ -272,9 +339,9 @@ class DataFetcher:
                     "recent_assists_avg": recent_assists_avg,
                     "recent_cs_avg": recent_cs_avg,
                     "win_rate": (player_matches_filtered["result"] == 1).mean(),
-                    "avg_kda": player_matches_filtered["kda"].mean(),
-                    "avg_gpm": player_matches_filtered["gpm"].mean(),
-                    "avg_kp_percent": player_matches_filtered["kp_percent"].mean(),
+                    "avg_kda": avg_kda,
+                    "avg_gpm": avg_gpm,
+                    "avg_kp_percent": avg_kp_percent,
                     "data_source": "oracles_elixir",
                     "data_years": data_years_str,
                     "map_range": map_range,
@@ -303,28 +370,29 @@ class DataFetcher:
             return self._get_minimal_stats(player_name)
     
     def _format_recent_matches(self, recent_matches: pd.DataFrame) -> List[Dict]:
-        """Format recent matches for API response"""
+        """Format recent matches for API response with proper handling of Oracle's Elixir columns"""
         matches = []
         for _, match in recent_matches.iterrows():
+            # Get available columns with safe defaults - use .get() for Series objects
             match_data = {
                 "match_id": str(match.get("gameid", "")),
-                "champion": str(match.get("champion", "")),
+                "champion": str(match.get("champion", "Unknown")),  # Oracle's Elixir doesn't have champion data
                 "kills": int(match.get("kills", 0)),
                 "deaths": int(match.get("deaths", 0)),
                 "assists": int(match.get("assists", 0)),
                 "cs": int(match.get("total cs", 0)),
                 "gold": int(match.get("earnedgold", 0)),
-                "damage_dealt": int(match.get("dpm", 0)) if "dpm" in match else 0,
-                "vision_score": int(match.get("visionscore", 0)),
+                "damage_dealt": int(match.get("dpm", 0)),  # Use .get() for Series
+                "vision_score": int(match.get("visionscore", 0)),  # Use .get() for Series
                 "win": bool(match.get("result", 0)),
-                "team_position": str(match.get("position", "")),
+                "team_position": str(match.get("position", "Unknown")),  # Use .get() for Series
                 "game_duration": int(match.get("gamelength", 0)),
-                "map_number": 1,
-                "side": "blue" if match.get("side", "") == "Blue" else "red",
+                "map_number": int(match.get("map_index_within_series", 1)),
+                "side": "blue" if match.get("side", "") == "Blue" else "red",  # Use .get() for Series
                 "match_date": str(match.get("date", "")),
-                "team_name": str(match.get("teamname", "")),
-                "opponent": str(match.get("opponent", "")),
-                "league": str(match.get("league", "")),
+                "team_name": str(match.get("teamname", "Unknown")),
+                "opponent": str(match.get("opponent", "Unknown")),  # Use .get() for Series
+                "league": str(match.get("league", "Unknown")),  # Use .get() for Series
                 "data_year": str(match.get("data_year", ""))
             }
             matches.append(match_data)
