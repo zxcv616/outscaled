@@ -1011,17 +1011,32 @@ class PropPredictor:
                         if std_recent > 0:
                             z_score = (prop_value - mean_recent) / std_recent
                             
-                            # If model prediction contradicts statistical expectation AND z-score is significant
-                            if prediction_label != statistical_expectation and abs(z_score) > 0.8:
+                            # FIXED: Only trigger override for truly extreme cases
+                            # Check for extreme z-score (> 6.0 or < -6.0)
+                            if abs(z_score) > 6.0:
                                 should_override = True
-                                override_reason = f"Model prediction ({prediction_label}) contradicts statistical analysis ({statistical_expectation}) with z-score {z_score:.1f}"
-                                logger.info(f"Statistical override triggered: {override_reason}")
+                                override_reason = f"Extreme z-score ({z_score:.1f}) indicates statistically impossible prop value"
+                                logger.info(f"Extreme z-score override triggered: {override_reason}")
+                            
+                            # Check for extreme volatility (CV > 140%)
+                            volatility_cv = (std_recent / mean_recent) * 100 if mean_recent > 0 else 0
+                            if volatility_cv > 140.0:
+                                should_override = True
+                                override_reason = f"Extreme volatility ({volatility_cv:.1f}% CV) indicates unreliable recent data"
+                                logger.info(f"Extreme volatility override triggered: {override_reason}")
+                            
+                            # Check for NaN features (data quality issues)
+                            if np.isnan(z_score) or np.isnan(volatility_cv):
+                                should_override = True
+                                override_reason = "NaN values detected in statistical calculations"
+                                logger.info(f"NaN override triggered: {override_reason}")
+                            
+                            # Debug logging for override decisions
+                            if should_override:
+                                logger.info(f"[Override Triggered] z={z_score:.2f}, volatility={volatility_cv:.1f}%, recent_avg={mean_recent:.1f}, prop={prop_value:.1f}")
                 
-                # If model prediction contradicts statistical expectation, trigger override
-                if prediction_label != statistical_expectation:
-                    should_override = True
-                    override_reason = f"Model prediction ({prediction_label}) contradicts statistical analysis ({statistical_expectation})"
-                    logger.info(f"Statistical override triggered: {override_reason}")
+                # REMOVED: The overly aggressive override that triggered for any statistical contradiction
+                # Only trigger override for truly extreme cases as defined above
             
             # SHORT-TERM FIX: Dramatically reduce rule-based overrides
             # Only override for very low confidence predictions (< 40% instead of < 60%)
@@ -1038,8 +1053,8 @@ class PropPredictor:
             # Let the model's natural confidence guide predictions
             # Only apply override if needed for very low confidence
             if should_override:
-                if "statistical analysis" in override_reason:
-                    # For statistical contradictions, use statistical expectation
+                if "extreme" in override_reason.lower() or "nan" in override_reason.lower():
+                    # For extreme cases, use conservative prediction
                     if recent_form > prop_value:
                         prediction_label = "MORE"
                         confidence_boost = 15  # Increased from 10
