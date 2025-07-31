@@ -26,9 +26,22 @@ def create_map_index_column(df: pd.DataFrame) -> pd.DataFrame:
     # Extract the series identifier (before the underscore)
     df_copy['match_series'] = df_copy['gameid'].str.split('_').str[0]
     
-    # Create map index within each series
-    # Group by match_series and assign sequential map indices
-    df_copy['map_index_within_series'] = df_copy.groupby('match_series')['gameid'].rank(method='dense').astype(int)
+    # FIXED: Create proper map indices within each series
+    # Instead of sequential numbering, we need to identify actual map numbers
+    # For Oracle's Elixir data, we need to determine which map each game represents
+    
+    # Method 1: Try to extract map number from gameid if it contains map info
+    # If gameid format is like "LOLTMNT03_179647_Map1" or similar
+    if df_copy['gameid'].str.contains('Map', case=False).any():
+        # Extract map number from gameid if it contains map information
+        df_copy['map_index_within_series'] = df_copy['gameid'].str.extract(r'Map(\d+)', expand=False).astype(int)
+    else:
+        # Method 2: Use date/time ordering within each series to determine map order
+        # Sort by date within each series and assign map numbers based on chronological order
+        df_copy = df_copy.sort_values(['match_series', 'date'])
+        
+        # Group by match_series and assign map numbers based on chronological order
+        df_copy['map_index_within_series'] = df_copy.groupby('match_series').cumcount() + 1
     
     return df_copy
 

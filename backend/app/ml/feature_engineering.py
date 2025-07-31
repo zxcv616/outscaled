@@ -96,11 +96,11 @@ class FeaturePipeline:
 
 class FeatureEngineer:
     def __init__(self):
-        # Extract constants to class variables
+        # Centralized constants for easy tuning
         self.STRONG_TEAMS = {
             'T1', 'Gen.G', 'JD Gaming', 'Bilibili Gaming', 'G2 Esports', 
             'Fnatic', 'Team Liquid', 'Cloud9', '100 Thieves', 'TSM',
-            'DRX', 'DWG KIA', 'T1', 'Gen.G', 'KT Rolster', 'Hanwha Life Esports'
+            'DRX', 'DWG KIA', 'KT Rolster', 'Hanwha Life Esports'
         }
         
         self.TOURNAMENT_TIERS = {
@@ -116,6 +116,20 @@ class FeatureEngineer:
             'mid': 1.1,
             'adc': 1.0,
             'support': 0.8
+        }
+        
+        # Centralized pressure weights for tournament tiers
+        self.PRESSURE_WEIGHTS = {
+            'worlds': 1.0,      # Highest pressure
+            'msi': 0.9,         # Very high pressure
+            'lcs': 0.7,         # High pressure
+            'lec': 0.7,         # High pressure
+            'lck': 0.8,         # Very high pressure
+            'lpl': 0.8,         # Very high pressure
+            'playoffs': 0.9,    # High pressure
+            'finals': 1.0,      # Highest pressure
+            'semifinals': 0.8,  # High pressure
+            'quarterfinals': 0.7 # Medium-high pressure
         }
         
         # Feature names list (34 features total: 14 base + 17 derived + 3 recent form)
@@ -135,17 +149,36 @@ class FeatureEngineer:
             # Recent form features (3)
             'recent_vs_season_ratio', 'recent_win_rate', 'recent_volatility'
         ]
+        
+        # Feature families for grouped analysis and ablation tests
+        self.feature_families = {
+            'base': ['avg_kills', 'avg_assists', 'avg_cs', 'avg_deaths', 'avg_gold', 
+                    'avg_damage', 'avg_vision', 'recent_kills_avg', 'recent_assists_avg', 
+                    'recent_cs_avg', 'win_rate', 'avg_kda', 'avg_gpm', 'avg_kp_percent'],
+            'derived': ['consistency_score', 'recent_form_trend', 'data_source_quality', 
+                       'maps_played', 'opponent_strength', 'tournament_tier', 'position_factor',
+                       'champion_pool_size', 'team_synergy', 'meta_adaptation', 'pressure_handling',
+                       'late_game_performance', 'early_game_impact', 'mid_game_transition',
+                       'objective_control', 'champion_performance_variance', 'role_specific_performance'],
+            'recent_form': ['recent_vs_season_ratio', 'recent_win_rate', 'recent_volatility']
+        }
+        
+        # Feature version for reproducibility
+        self.feature_version = "v1.3"
     
     def engineer_features(self, player_stats: Dict, prop_request: Dict, 
-                         include_prop_value: bool = False) -> np.ndarray:
+                         include_prop_value: bool = False, debug: bool = False,
+                         ablation_flags: Optional[Dict[str, bool]] = None) -> np.ndarray:
         """Engineer features from player statistics and prop request with improved map-range support"""
         try:
+            player_name = player_stats.get('player_name', 'unknown')
+            
             # IMPROVED: Input validation for core stats
             core_stats = ['avg_kills', 'avg_assists', 'avg_cs', 'win_rate']
             missing_core_stats = [stat for stat in core_stats if player_stats.get(stat) is None]
             
             if len(missing_core_stats) > 2:  # If more than 2 core stats are missing
-                logger.warning(f"Too many missing core stats: {missing_core_stats}. Using fallback features.")
+                logger.warning(f"Player {player_name}: Too many missing core stats: {missing_core_stats}. Using fallback features.")
                 return self._create_minimal_features(prop_request)
             
             # Extract base features (14 features)
@@ -157,14 +190,18 @@ class FeatureEngineer:
             # Combine features
             features = base_features + derived_features
             
-            # IMPROVED: Dynamic feature validation
+            # IMPROVED: Dynamic feature validation using feature_names length
             expected_features = len(self.feature_names)
             if len(features) != expected_features:
-                logger.debug(f"Expected {expected_features} features, got {len(features)}. Padding or truncating.")
+                logger.debug(f"Player {player_name}: Expected {expected_features} features, got {len(features)}. Padding or truncating.")
                 if len(features) < expected_features:
                     features.extend([0.0] * (expected_features - len(features)))
                 else:
                     features = features[:expected_features]
+            
+            # Apply ablation flags if provided
+            if ablation_flags:
+                features = self._apply_ablation_flags(features, ablation_flags)
             
             # Optional: Add prop_value for inference-only use cases
             if include_prop_value:
@@ -172,17 +209,52 @@ class FeatureEngineer:
                 features.append(prop_value)
             
             feature_array = np.array(features, dtype=np.float32)
-            logger.debug(f"Engineered {len(feature_array)} features")
+            logger.debug(f"Player {player_name}: Engineered {len(feature_array)} features")
+            
+            # Return feature dictionary for debugging if requested
+            if debug:
+                feature_dict = dict(zip(self.feature_names, feature_array.tolist()))
+                return feature_array, feature_dict
             
             return feature_array
             
         except Exception as e:
-            logger.error(f"Error engineering features: {e}")
+            logger.error(f"Player {player_stats.get('player_name', 'unknown')}: Error engineering features: {e}")
             return self._create_minimal_features(prop_request)
+    
+    def _apply_ablation_flags(self, features: List[float], ablation_flags: Dict[str, bool]) -> List[float]:
+        """Apply ablation flags to disable specific feature families"""
+        try:
+            feature_dict = dict(zip(self.feature_names, features))
+            
+            # Disable base features if flagged
+            if not ablation_flags.get('base_features', True):
+                for feature in self.feature_families['base']:
+                    if feature in feature_dict:
+                        feature_dict[feature] = 0.0
+            
+            # Disable derived features if flagged
+            if not ablation_flags.get('derived_features', True):
+                for feature in self.feature_families['derived']:
+                    if feature in feature_dict:
+                        feature_dict[feature] = 0.0
+            
+            # Disable recent form features if flagged
+            if not ablation_flags.get('recent_form_features', True):
+                for feature in self.feature_families['recent_form']:
+                    if feature in feature_dict:
+                        feature_dict[feature] = 0.0
+            
+            return list(feature_dict.values())
+        except Exception as e:
+            logger.error(f"Error applying ablation flags: {e}")
+            return features
     
     def _extract_base_features(self, player_stats: Dict, prop_request: Dict) -> List[float]:
         """Extract base statistical features"""
         try:
+            player_name = player_stats.get('player_name', 'unknown')
+            
             # Base statistics (14 features)
             features = [
                 player_stats.get("avg_kills", 0.0),
@@ -219,12 +291,14 @@ class FeatureEngineer:
             return features
             
         except Exception as e:
-            logger.error(f"Error extracting base features: {e}")
+            logger.error(f"Player {player_stats.get('player_name', 'unknown')}: Error extracting base features: {e}")
             return [0.0] * 14
     
     def _extract_derived_features(self, player_stats: Dict, prop_request: Dict) -> List[float]:
         """Extract derived/computed features"""
         try:
+            player_name = player_stats.get('player_name', 'unknown')
+            
             # Get map range from prop request
             map_range = prop_request.get('map_range', [1])
             maps_played = len(map_range)
@@ -260,12 +334,14 @@ class FeatureEngineer:
             return derived_features
             
         except Exception as e:
-            logger.error(f"Error extracting derived features: {e}")
+            logger.error(f"Player {player_stats.get('player_name', 'unknown')}: Error extracting derived features: {e}")
             return [0.0] * 20  # 17 base + 3 recent form features
     
     def _calculate_recent_form_features(self, recent_matches: List[Dict], player_stats: Dict) -> List[float]:
         """Calculate recent form features to better capture recent performance"""
         try:
+            player_name = player_stats.get('player_name', 'unknown')
+            
             if not recent_matches:
                 return [0.5, 0.5, 0.5]  # Neutral values if no recent matches
             
@@ -294,7 +370,7 @@ class FeatureEngineer:
             return [performance_ratio, recent_win_rate, volatility]
             
         except Exception as e:
-            logger.error(f"Error calculating recent form features: {e}")
+            logger.error(f"Player {player_stats.get('player_name', 'unknown')}: Error calculating recent form features: {e}")
             return [0.5, 0.5, 0.5]
     
     def _normalize_score(self, value: float, expected_max: float) -> float:
@@ -304,6 +380,8 @@ class FeatureEngineer:
     def _calculate_consistency_score(self, player_stats: Dict) -> float:
         """Calculate consistency score based on standard deviation of recent performance"""
         recent_matches = player_stats.get('recent_matches', [])
+        player_name = player_stats.get('player_name', 'unknown')
+        
         if not recent_matches or len(recent_matches) < 3:
             return 0.5  # Default moderate consistency
         
@@ -319,12 +397,14 @@ class FeatureEngineer:
             consistency = 1.0 / (1.0 + (kills_std / max(kills_mean, 1.0)))
             return min(max(consistency, 0.0), 1.0)
         except Exception as e:
-            logger.warning(f"Error calculating consistency score: {e}")
+            logger.warning(f"Player {player_name}: Error calculating consistency score: {e}")
             return 0.5
     
     def _calculate_recent_form_trend(self, player_stats: Dict) -> float:
         """Calculate recent form trend using linear regression (IMPROVED)"""
         recent_matches = player_stats.get('recent_matches', [])
+        player_name = player_stats.get('player_name', 'unknown')
+        
         if not recent_matches or len(recent_matches) < 5:
             return 0.0
         
@@ -352,7 +432,7 @@ class FeatureEngineer:
             
             return 0.0
         except Exception as e:
-            logger.warning(f"Error calculating form trend: {e}")
+            logger.warning(f"Player {player_name}: Error calculating form trend: {e}")
             return 0.0
     
     def _calculate_data_source_quality(self, player_stats: Dict) -> float:
@@ -371,6 +451,8 @@ class FeatureEngineer:
     def _calculate_dynamic_data_quality(self, player_stats: Dict) -> float:
         """Calculate dynamic data quality score based on recent matches"""
         recent_matches = player_stats.get('recent_matches', [])
+        player_name = player_stats.get('player_name', 'unknown')
+        
         if not recent_matches:
             return 0.5
         
@@ -385,7 +467,7 @@ class FeatureEngineer:
                 return 0.3 + (0.7 * (1.0 - (missing_stats / len(recent_matches))))
             return 1.0
         except Exception as e:
-            logger.warning(f"Error calculating dynamic data quality: {e}")
+            logger.warning(f"Player {player_name}: Error calculating dynamic data quality: {e}")
             return 0.5
     
     def _calculate_opponent_strength(self, prop_request: Dict) -> float:
@@ -420,21 +502,13 @@ class FeatureEngineer:
         # IMPROVED: Safe position extraction with fallback
         position = str(player_stats.get('position', 'mid')).lower()
         
-        # Position-specific factors based on role importance for different stats
-        position_factors = {
-            'top': 1.0,      # Balanced role
-            'jungle': 0.9,   # Slightly less KDA focused
-            'mid': 1.1,      # High KDA importance
-            'adc': 1.0,      # Balanced, but CS focused
-            'support': 0.8    # Lower KDA, higher vision/assists
-        }
-        
-        return position_factors.get(position, 1.0)
+        return self.POSITION_FACTORS.get(position, 1.0)
     
     def _calculate_role_specific_performance(self, player_stats: Dict) -> float:
         """Calculate role-specific performance metrics"""
         position = str(player_stats.get('position', 'mid')).lower()
         recent_matches = player_stats.get('recent_matches', [])
+        player_name = player_stats.get('player_name', 'unknown')
         
         if not recent_matches:
             return 0.5
@@ -514,12 +588,14 @@ class FeatureEngineer:
                 return (cs_score * 0.6) + (kda_score * 0.4)
                 
         except Exception as e:
-            logger.warning(f"Error calculating role-specific performance: {e}")
+            logger.warning(f"Player {player_name}: Error calculating role-specific performance: {e}")
             return 0.5
     
     def _calculate_champion_pool_size(self, player_stats: Dict) -> float:
         """Calculate champion pool diversity"""
         recent_matches = player_stats.get('recent_matches', [])
+        player_name = player_stats.get('player_name', 'unknown')
+        
         if not recent_matches:
             return 0.5
         
@@ -537,7 +613,7 @@ class FeatureEngineer:
             diversity = unique_champions / max(total_matches, 1)
             return min(diversity, 1.0)
         except Exception as e:
-            logger.warning(f"Error calculating champion pool size: {e}")
+            logger.warning(f"Player {player_name}: Error calculating champion pool size: {e}")
             return 0.5
     
     def _calculate_team_synergy(self, player_stats: Dict) -> float:
@@ -557,7 +633,7 @@ class FeatureEngineer:
             synergy = (win_rate * 0.6) + (recent_win_rate * 0.4)
             return min(max(synergy, 0.0), 1.0)
         except Exception as e:
-            logger.warning(f"Error calculating team synergy: {e}")
+            logger.warning(f"Player {player_stats.get('player_name', 'unknown')}: Error calculating team synergy: {e}")
             return win_rate
     
     def _calculate_meta_adaptation(self, player_stats: Dict) -> float:
@@ -572,6 +648,8 @@ class FeatureEngineer:
     def _calculate_pressure_handling(self, player_stats: Dict, prop_request: Dict) -> float:
         """Calculate pressure handling based on performance in high-stakes situations with context"""
         recent_matches = player_stats.get('recent_matches', [])
+        player_name = player_stats.get('player_name', 'unknown')
+        
         if not recent_matches:
             return 0.5
         
@@ -580,31 +658,16 @@ class FeatureEngineer:
             tournament = prop_request.get('tournament', '').lower()
             opponent = prop_request.get('opponent', '').lower()
             
-            # Define pressure levels based on tournament tier
-            pressure_weights = {
-                'worlds': 1.0,      # Highest pressure
-                'msi': 0.9,         # Very high pressure
-                'lcs': 0.7,         # High pressure
-                'lec': 0.7,         # High pressure
-                'lck': 0.8,         # Very high pressure
-                'lpl': 0.8,         # Very high pressure
-                'playoffs': 0.9,    # High pressure
-                'finals': 1.0,      # Highest pressure
-                'semifinals': 0.8,  # High pressure
-                'quarterfinals': 0.7 # Medium-high pressure
-            }
-            
-            # Calculate base pressure from tournament
+            # Calculate base pressure from tournament using centralized weights
             base_pressure = 0.5  # Default medium pressure
-            for pressure_key, weight in pressure_weights.items():
+            for pressure_key, weight in self.PRESSURE_WEIGHTS.items():
                 if pressure_key in tournament:
                     base_pressure = weight
                     break
             
             # Adjust pressure based on opponent strength
             if opponent:
-                strong_teams = ['t1', 'gen.g', 'jdg', 'blg', 'tes', 'g2', 'fnc', 'c9', 'tl']
-                if any(team in opponent for team in strong_teams):
+                if any(team in opponent for team in self.STRONG_TEAMS):
                     base_pressure = min(1.0, base_pressure + 0.2)  # Increase pressure vs strong teams
             
             # Calculate performance variance under pressure
@@ -629,7 +692,7 @@ class FeatureEngineer:
                 return min(max(adjusted_score, 0.0), 1.0)
             return 0.5
         except Exception as e:
-            logger.warning(f"Error calculating pressure handling: {e}")
+            logger.warning(f"Player {player_name}: Error calculating pressure handling: {e}")
             return 0.5
     
     def _calculate_late_game_performance(self, player_stats: Dict) -> float:
@@ -657,8 +720,10 @@ class FeatureEngineer:
         return self._normalize_score(avg_vision, 50.0)  # Normalize to [0, 1]
     
     def _calculate_champion_performance_variance(self, player_stats: Dict) -> float:
-        """Calculate champion performance variance"""
+        """Calculate champion performance variance with optional weighting"""
         recent_matches = player_stats.get('recent_matches', [])
+        player_name = player_stats.get('player_name', 'unknown')
+        
         if not recent_matches:
             return 0.5
         
@@ -714,13 +779,14 @@ class FeatureEngineer:
                 return min(max(average_variance_score, 0.0), 1.0)
             return 0.5
         except Exception as e:
-            logger.warning(f"Error calculating champion performance variance: {e}")
+            logger.warning(f"Player {player_name}: Error calculating champion performance variance: {e}")
             return 0.5
     
     def _create_minimal_features(self, prop_request: Dict) -> np.ndarray:
         """Create minimal features for fallback cases"""
         try:
-            features = [0.0] * 34  # Initialize with zeros for 34 features
+            # IMPROVED: Use feature_names length instead of hardcoded 34
+            features = [0.0] * len(self.feature_names)
             
             # Set basic values
             features[16] = len(prop_request.get('map_range', [1]))  # maps_played
@@ -728,11 +794,19 @@ class FeatureEngineer:
             return np.array(features, dtype=np.float32)
         except Exception as e:
             logger.error(f"Error creating minimal features: {e}")
-            return np.zeros(34, dtype=np.float32)
+            return np.zeros(len(self.feature_names), dtype=np.float32)
     
     def get_feature_names(self) -> List[str]:
         """Get list of feature names"""
         return self.feature_names.copy()
+    
+    def get_feature_families(self) -> Dict[str, List[str]]:
+        """Get feature families for grouped analysis"""
+        return self.feature_families.copy()
+    
+    def get_feature_version(self) -> str:
+        """Get feature version for reproducibility"""
+        return self.feature_version
     
     def get_feature_description(self, feature_name: str) -> str:
         """Get description of a feature"""
@@ -767,6 +841,9 @@ class FeatureEngineer:
             'mid_game_transition': 'Mid game transition score',
             'objective_control': 'Objective control score',
             'champion_performance_variance': 'Champion performance variance score',
-            'role_specific_performance': 'Role-specific performance score'
+            'role_specific_performance': 'Role-specific performance score',
+            'recent_vs_season_ratio': 'Recent vs season performance ratio',
+            'recent_win_rate': 'Recent win rate (last 5 matches)',
+            'recent_volatility': 'Recent performance volatility'
         }
         return descriptions.get(feature_name, 'Unknown feature') 

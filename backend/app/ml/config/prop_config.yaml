@@ -10,8 +10,8 @@ kills:
 
 assists:
   min_value: 0
-  max_value: 25
-  impossible_threshold: 20
+  max_value: 35
+  impossible_threshold: 35
   low_threshold_factor: 0.5
   high_threshold_factor: 1.5
 

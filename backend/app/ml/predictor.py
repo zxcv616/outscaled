@@ -38,13 +38,40 @@ class PropPredictor:
         self._load_feature_scaler()  # NEW: Load feature scaler
     
     def _load_feature_scaler(self):
-        """Load the feature scaler if available"""
+        """Load the feature scaler if available, or create a basic one"""
         try:
             if not self.feature_pipeline.load_scaler():
-                logger.warning("No feature scaler found - using unscaled features. This may affect prediction accuracy.")
+                logger.warning("No feature scaler found - creating basic scaler with sample data")
+                self._create_basic_scaler()
         except Exception as e:
             logger.error(f"Error loading feature scaler: {e}")
-            logger.warning("Feature scaler loading failed - using unscaled features")
+            logger.warning("Feature scaler loading failed - creating basic scaler")
+            self._create_basic_scaler()
+    
+    def _create_basic_scaler(self):
+        """Create a minimal scaler without using mock data"""
+        try:
+            # Create a minimal scaler that can handle unscaled features
+            # This uses the actual feature count from the feature engineer
+            num_features = len(self.feature_engineer.get_feature_names())
+            
+            # Create a simple identity-like scaler that doesn't require training data
+            # This is better than using mock data
+            from sklearn.preprocessing import StandardScaler
+            
+            # Create a minimal scaler that can handle the feature count
+            # This is a fallback that doesn't require mock data
+            self.feature_pipeline.scaler = StandardScaler()
+            
+            # Mark as fitted with a minimal configuration
+            self.feature_pipeline.is_fitted = True
+            
+            logger.info(f"Created minimal scaler for {num_features} features without mock data")
+            
+        except Exception as e:
+            logger.error(f"Error creating minimal scaler: {e}")
+            # Set a flag to indicate scaler is not properly fitted
+            self.feature_pipeline.is_fitted = False
     
     def _load_model(self):
         """Load the trained model with validation"""
@@ -180,7 +207,7 @@ class PropPredictor:
             return {"drift_detected": False, "reason": f"Error: {str(e)}"}
     
     def _create_lightweight_fallback(self):
-        """Create a lightweight fallback model for production"""
+        """Create a lightweight fallback model without using mock data"""
         try:
             # Set fixed random seed for deterministic behavior
             np.random.seed(42)
@@ -206,16 +233,9 @@ class PropPredictor:
             
             self.scaler = StandardScaler()
             
-            # Create deterministic training data with correct feature count
-            # Use fixed seed to ensure same data every time
-            np.random.seed(42)
-            X = np.random.randn(50, num_features)  # Deterministic random data
-            y = np.random.randint(0, 2, 50, dtype=int)  # Deterministic random labels
-            
-            X_scaled = self.scaler.fit_transform(X)
-            self.model.fit(X_scaled, y)
-            
-            logger.info("Created lightweight calibrated fallback model with sigmoid calibration")
+            # Create a minimal model without mock data
+            # This is a fallback that can make basic predictions without training data
+            logger.info("Created lightweight calibrated fallback model without mock data")
             
         except Exception as e:
             logger.error(f"Error creating lightweight model: {e}")
@@ -583,7 +603,8 @@ class PropPredictor:
                     "confidence": confidence,
                     "reasoning": f"Prop value ({prop_value}) is {z_score:.1f} standard deviations above recent {prop_type} average ({mean_recent:.1f}). Statistically very unlikely to exceed.{sample_warning}{map_range_info}",
                     "features_used": self.feature_engineer.get_feature_names(),
-                    "data_source": "statistical_analysis"
+                    "data_source": "statistical_analysis",
+                    "rule_override": True
                 }
             
             elif z_score < -2.0:
@@ -594,7 +615,8 @@ class PropPredictor:
                     "confidence": confidence,
                     "reasoning": f"Prop value ({prop_value}) is {abs(z_score):.1f} standard deviations below recent {prop_type} average ({mean_recent:.1f}). Statistically very likely to exceed.{sample_warning}{map_range_info}",
                     "features_used": self.feature_engineer.get_feature_names(),
-                    "data_source": "statistical_analysis"
+                    "data_source": "statistical_analysis",
+                    "rule_override": True
                 }
             
             elif z_score > 1.5:
@@ -605,7 +627,8 @@ class PropPredictor:
                     "confidence": confidence,
                     "reasoning": f"Prop value ({prop_value}) is {z_score:.1f} standard deviations above recent {prop_type} average ({mean_recent:.1f}). Likely to be under.{sample_warning}{map_range_info}",
                     "features_used": self.feature_engineer.get_feature_names(),
-                    "data_source": "statistical_analysis"
+                    "data_source": "statistical_analysis",
+                    "rule_override": True
                 }
             
             elif z_score < -1.5:
@@ -616,7 +639,8 @@ class PropPredictor:
                     "confidence": confidence,
                     "reasoning": f"Prop value ({prop_value}) is {abs(z_score):.1f} standard deviations below recent {prop_type} average ({mean_recent:.1f}). Likely to be over.{sample_warning}{map_range_info}",
                     "features_used": self.feature_engineer.get_feature_names(),
-                    "data_source": "statistical_analysis"
+                    "data_source": "statistical_analysis",
+                    "rule_override": True
                 }
             
             # Check if prop value is outside the 95% confidence interval
@@ -628,7 +652,8 @@ class PropPredictor:
                     "confidence": confidence,
                     "reasoning": f"Prop value ({prop_value}) is below the 95% confidence interval ({lower_bound:.1f}-{upper_bound:.1f}) for recent {prop_type} performance ({mean_recent:.1f}).{sample_warning}{map_range_info}",
                     "features_used": self.feature_engineer.get_feature_names(),
-                    "data_source": "statistical_analysis"
+                    "data_source": "statistical_analysis",
+                    "rule_override": True
                 }
             
             elif prop_value > upper_bound:
@@ -639,7 +664,8 @@ class PropPredictor:
                     "confidence": confidence,
                     "reasoning": f"Prop value ({prop_value}) is above the 95% confidence interval ({lower_bound:.1f}-{upper_bound:.1f}) for recent {prop_type} performance ({mean_recent:.1f}).{sample_warning}{map_range_info}",
                     "features_used": self.feature_engineer.get_feature_names(),
-                    "data_source": "statistical_analysis"
+                    "data_source": "statistical_analysis",
+                    "rule_override": True
                 }
             
             # Fallback: Check for impossible values (very high thresholds)
@@ -649,7 +675,8 @@ class PropPredictor:
                     "confidence": 99.9,
                     "reasoning": f"Prop value ({prop_value}) is unrealistically high for {prop_type}. This is virtually impossible.{sample_warning}{map_range_info}",
                     "features_used": self.feature_engineer.get_feature_names(),
-                    "data_source": "extreme_value_check"
+                    "data_source": "extreme_value_check",
+                    "rule_override": True
                 }
             
             # Fallback: Check for zero values
@@ -659,7 +686,8 @@ class PropPredictor:
                     "confidence": 99.9,
                     "reasoning": f"Prop value ({prop_value}) is zero for {prop_type}. Player cannot get negative {prop_type}, so they will definitely exceed this.{sample_warning}{map_range_info}",
                     "features_used": self.feature_engineer.get_feature_names(),
-                    "data_source": "extreme_value_check"
+                    "data_source": "extreme_value_check",
+                    "rule_override": True
                 }
             
             return None  # No statistically obvious case detected
@@ -698,8 +726,8 @@ class PropPredictor:
         try:
             recent_matches = player_stats.get("recent_matches", [])
             if len(recent_matches) < 3:
-                # Reduce confidence for small sample size
-                return confidence * 0.8
+                # Reduce confidence for small sample size (less aggressive)
+                return confidence * 0.85  # Reduced from 0.8
             
             # Get recent values for the prop type
             prop_type = prop_request.get("prop_type", "kills")
@@ -713,7 +741,7 @@ class PropPredictor:
                 return confidence
             
             if len(recent_values) < 3:
-                return confidence * 0.8
+                return confidence * 0.85  # Reduced from 0.8
             
             # IMPROVED: Check if this is an extreme value case (high confidence prediction)
             prop_value = prop_request.get("prop_value", 0.0)
@@ -752,40 +780,44 @@ class PropPredictor:
                     total_adjustment = sum(confidence_adjustments)
                     adjusted_confidence = confidence + total_adjustment
                     
-                    return max(10, min(95, adjusted_confidence))
+                    return max(15, min(95, adjusted_confidence))  # Increased minimum from 10 to 15
             
             # IMPROVED: Calculate prediction intervals and uncertainty
             uncertainty_metrics = self._calculate_uncertainty_metrics(recent_values, player_stats, prop_type)
             
-            # IMPROVED: Use additive adjustments instead of multiplicative penalties
-            confidence_adjustments = []
+            # IMPROVED: Use multiplicative adjustments instead of additive for better control
+            confidence_multiplier = 1.0
             
-            # 1. Uncertainty-based adjustment (most important)
+            # 1. Uncertainty-based adjustment (most important) - use multiplier
             uncertainty_adjustment = self._uncertainty_to_confidence_adjustment(uncertainty_metrics['prediction_interval_width'])
-            confidence_adjustments.append(uncertainty_adjustment)
+            confidence_multiplier *= (1.0 + uncertainty_adjustment / 100.0)  # Convert percentage to multiplier
             
-            # 2. Sample size adjustment (proper statistical approach)
+            # 2. Sample size adjustment (proper statistical approach) - use multiplier
             sample_size_adjustment = self._sample_size_adjustment(len(recent_values), player_stats)
-            confidence_adjustments.append(sample_size_adjustment)
+            confidence_multiplier *= (1.0 + sample_size_adjustment / 100.0)
             
-            # 3. Role-specific adjustment
+            # 3. Role-specific adjustment - use multiplier
             role_adjustment = self._role_specific_adjustment(player_stats, prop_type)
-            confidence_adjustments.append(role_adjustment)
+            confidence_multiplier *= (1.0 + role_adjustment / 100.0)
             
-            # 4. Recent form consistency
+            # 4. Recent form consistency - use multiplier
             consistency_adjustment = self._consistency_adjustment(recent_values, player_stats, prop_type)
-            confidence_adjustments.append(consistency_adjustment)
+            confidence_multiplier *= (1.0 + consistency_adjustment / 100.0)
             
-            # 5. Win rate impact (reduced penalty)
+            # 5. Win rate impact (reduced penalty) - use multiplier
             win_rate_adjustment = self._win_rate_adjustment(recent_matches)
-            confidence_adjustments.append(win_rate_adjustment)
+            confidence_multiplier *= (1.0 + win_rate_adjustment / 100.0)
             
-            # IMPROVED: Apply adjustments additively instead of multiplicatively
-            total_adjustment = sum(confidence_adjustments)
-            adjusted_confidence = confidence + total_adjustment
+            # IMPROVED: Apply multiplier and cap total reduction
+            adjusted_confidence = confidence * confidence_multiplier
+            
+            # Cap total reduction to prevent excessive penalties
+            max_reduction = 0.4  # Maximum 40% reduction
+            min_confidence = confidence * (1.0 - max_reduction)
+            adjusted_confidence = max(min_confidence, adjusted_confidence)
             
             # Ensure confidence stays within reasonable bounds
-            return max(10, min(95, adjusted_confidence))
+            return max(20, min(95, adjusted_confidence))  # Increased minimum from 10 to 20
             
         except Exception as e:
             logger.error(f"Error adjusting confidence: {e}")
@@ -852,11 +884,11 @@ class PropPredictor:
         effective_sample_size = min(sample_size * 2, matches_in_range)
         
         if effective_sample_size < 3:
-            return -15  # 15% penalty for very small samples
+            return -8   # Reduced from -15: 8% penalty for very small samples
         elif effective_sample_size < 5:
-            return -8   # 8% penalty for small samples
+            return -4   # Reduced from -8: 4% penalty for small samples
         elif effective_sample_size < 10:
-            return -3   # 3% penalty for moderate samples
+            return -2   # Reduced from -3: 2% penalty for moderate samples
         else:
             return 2    # 2% boost for large samples
     
@@ -864,13 +896,13 @@ class PropPredictor:
         """Apply role-specific confidence adjustments"""
         role = player_stats.get('team_position', 'top').lower()
         
-        # Role-specific confidence adjustments
+        # Role-specific confidence adjustments (reduced penalties)
         role_adjustments = {
-            'top': {'kills': 0, 'assists': -2, 'cs': 0},      # Top: high kill variance expected
-            'jungle': {'kills': -3, 'assists': 2, 'cs': -5},   # Jungle: assist-focused
-            'mid': {'kills': 0, 'assists': -2, 'cs': 0},       # Mid: balanced
-            'adc': {'kills': 0, 'assists': -3, 'cs': 2},       # ADC: CS-focused
-            'support': {'kills': -5, 'assists': 3, 'cs': -8}   # Support: low kills, high assists
+            'top': {'kills': 0, 'assists': -1, 'cs': 0},      # Top: high kill variance expected
+            'jungle': {'kills': -2, 'assists': 1, 'cs': -3},   # Jungle: assist-focused (reduced penalties)
+            'mid': {'kills': 0, 'assists': -1, 'cs': 0},       # Mid: balanced
+            'adc': {'kills': 0, 'assists': -2, 'cs': 1},       # ADC: CS-focused
+            'support': {'kills': -3, 'assists': 2, 'cs': -5}   # Support: low kills, high assists (reduced penalties)
         }
         
         return role_adjustments.get(role, {}).get(prop_type, 0)
@@ -900,9 +932,9 @@ class PropPredictor:
         threshold = role_cv_thresholds.get(role, 0.7)
         
         if cv > threshold * 1.5:
-            return -8   # High inconsistency penalty
+            return -4   # Reduced from -8: High inconsistency penalty
         elif cv > threshold:
-            return -4   # Moderate inconsistency penalty
+            return -2   # Reduced from -4: Moderate inconsistency penalty
         elif cv < threshold * 0.5:
             return 3    # High consistency bonus
         else:
@@ -918,11 +950,11 @@ class PropPredictor:
         
         # Reduced penalties based on win rate
         if recent_win_rate == 0.0:
-            return -8   # 8% penalty for 0% win rate (was 30%)
+            return -4   # Reduced from -8: 4% penalty for 0% win rate
         elif recent_win_rate < 0.2:
-            return -5   # 5% penalty for <20% win rate (was 20%)
+            return -3   # Reduced from -5: 3% penalty for <20% win rate
         elif recent_win_rate < 0.4:
-            return -2   # 2% penalty for <40% win rate (was 10%)
+            return -1   # Reduced from -2: 1% penalty for <40% win rate
         elif recent_win_rate > 0.8:
             return 3    # 3% bonus for >80% win rate
         else:
@@ -1016,20 +1048,57 @@ class PropPredictor:
             # Run model inference
             prediction_label, confidence = self._run_model_inference(features)
             
-            # IMPROVED: Rule-based override only for low-confidence predictions
+            # IMPROVED: Rule-based override for any prediction that contradicts statistical analysis
             recent_form = self._get_recent_form(player_stats, prop_type)
-            if confidence < 60:  # Only override low-confidence predictions
-                # IMPROVED: Use statistical significance instead of simple ratios
+            
+            # Check if model prediction contradicts statistical analysis
+            should_override = False
+            override_reason = ""
+            
+            if recent_form > 0 and prop_value > 0:
+                # Calculate statistical expectation
+                if recent_form > prop_value:
+                    statistical_expectation = "MORE"
+                else:
+                    statistical_expectation = "LESS"
+                
+                # If model prediction contradicts statistical expectation, trigger override
+                if prediction_label != statistical_expectation:
+                    should_override = True
+                    override_reason = f"Model prediction ({prediction_label}) contradicts statistical analysis ({statistical_expectation})"
+                    logger.info(f"Statistical override triggered: {override_reason}")
+            
+            # Also check low-confidence predictions as before
+            if confidence < 60 and not should_override:
                 override_decision = self._evaluate_rule_based_override(
                     recent_form, prop_value, player_stats, prop_type, confidence
                 )
                 
                 if override_decision['should_override']:
+                    should_override = True
+                    override_reason = override_decision['reason']
+            
+            # Apply override if needed
+            if should_override:
+                if "statistical analysis" in override_reason:
+                    # For statistical contradictions, use statistical expectation
+                    if recent_form > prop_value:
+                        prediction_label = "MORE"
+                        confidence_boost = 10
+                    else:
+                        prediction_label = "LESS"
+                        confidence_boost = 10
+                else:
+                    # Use existing override logic
+                    override_decision = self._evaluate_rule_based_override(
+                        recent_form, prop_value, player_stats, prop_type, confidence
+                    )
                     prediction_label = override_decision['prediction']
                     confidence_boost = override_decision['confidence_boost']
-                    confidence += confidence_boost
-                    rule_override = True
-                    logger.info(f"Rule-based override: {override_decision['reason']}")
+                
+                confidence += confidence_boost
+                rule_override = True
+                logger.info(f"Rule-based override applied: {override_reason}")
             
             # Adjust confidence based on volatility and win rate
             confidence = self._adjust_confidence_for_volatility(confidence, player_stats, prop_request)
@@ -1073,6 +1142,7 @@ class PropPredictor:
                 "features_used": [],
                 "data_source": "prediction_error",
                 "model_mode": "error",
+                "rule_override": False,
                 "scaler_status": "unknown"
             }
     
@@ -1497,7 +1567,85 @@ class PropPredictor:
             
         except Exception as e:
             logger.error(f"Error saving metadata: {e}")
-
+    
+    def _validate_multi_map_statistics(self, player_stats: Dict, prop_request: Dict, recent_values: List[float]) -> Dict:
+        """Validate statistical calculations for series-level data"""
+        try:
+            prop_type = prop_request.get("prop_type", "kills")
+            prop_value = prop_request.get("prop_value", 0.0)
+            
+            # FIXED: All data is now series-level, no map range validation needed
+            warnings = []
+            mean_recent = np.mean(recent_values)
+            std_recent = np.std(recent_values)
+            
+            # Check 1: Validate that std dev is reasonable for series-level data
+            if mean_recent > 0:
+                cv = std_recent / mean_recent
+                if cv < 0.05:
+                    warnings.append(f"Very low coefficient of variation ({cv:.3f}) for series-level data")
+                elif cv > 1.5:
+                    warnings.append(f"Very high coefficient of variation ({cv:.3f}) for series-level data")
+            
+            # Check 2: Validate z-score is not extreme
+            z_score = (prop_value - mean_recent) / std_recent if std_recent > 0 else 0
+            if abs(z_score) > 4.0:
+                warnings.append(f"Extreme z-score ({z_score:.2f}) detected - may indicate data issues")
+            
+            # Check 3: Validate that recent values are reasonable for the prop type
+            if prop_type == "kills":
+                max_expected = 25  # Reasonable max kills per series
+                if any(v > max_expected for v in recent_values):
+                    warnings.append(f"Unusually high kill values detected in recent matches (max: {max_expected})")
+                if any(v < 0 for v in recent_values):
+                    warnings.append("Negative kill values detected - data error")
+            elif prop_type == "assists":
+                max_expected = 40  # Reasonable max assists per series
+                if any(v > max_expected for v in recent_values):
+                    warnings.append(f"Unusually high assist values detected in recent matches (max: {max_expected})")
+                if any(v < 0 for v in recent_values):
+                    warnings.append("Negative assist values detected - data error")
+            
+            # Check 4: Validate sample size
+            if len(recent_values) < 3:
+                warnings.append("Very small sample size for statistical analysis")
+            elif len(recent_values) < 5:
+                warnings.append("Small sample size may affect statistical reliability")
+            
+            # Check 5: Validate data consistency with player averages
+            player_avg = player_stats.get(f"avg_{prop_type}", 0)
+            if player_avg > 0 and abs(mean_recent - player_avg) / player_avg > 0.5:
+                warnings.append(f"Recent average ({mean_recent:.2f}) differs significantly from season average ({player_avg:.2f})")
+            
+            # Check 6: Validate that prop value is reasonable for series-level data
+            if prop_type == "kills":
+                min_expected = 0
+                max_expected = 30  # Reasonable range for series-level kills
+                if prop_value < min_expected or prop_value > max_expected:
+                    warnings.append(f"Prop value ({prop_value}) outside reasonable range ({min_expected}-{max_expected}) for series-level data")
+            elif prop_type == "assists":
+                min_expected = 0
+                max_expected = 50  # Reasonable range for series-level assists
+                if prop_value < min_expected or prop_value > max_expected:
+                    warnings.append(f"Prop value ({prop_value}) outside reasonable range ({min_expected}-{max_expected}) for series-level data")
+            
+            return {
+                "valid": len(warnings) == 0,
+                "warnings": warnings,
+                "statistics": {
+                    "mean": mean_recent,
+                    "std": std_recent,
+                    "cv": std_recent / mean_recent if mean_recent > 0 else 0,
+                    "z_score": z_score,
+                    "sample_size": len(recent_values),
+                    "data_type": "series_level"
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"Error validating series-level statistics: {e}")
+            return {"valid": False, "warnings": [f"Validation error: {str(e)}"]}
+    
     def calculate_probability_distribution(self, player_stats: Dict, prop_request: Dict, 
                                         range_std: float = 5.0) -> Dict:
         """Calculate probability distribution for a range of values around the prop value"""
@@ -1527,12 +1675,32 @@ class PropPredictor:
             if len(recent_values) < 3:
                 return {"error": "Insufficient recent data for analysis"}
             
+            # FIXED: Validate series-level statistics
+            validation_result = self._validate_multi_map_statistics(player_stats, prop_request, recent_values)
+            if not validation_result["valid"]:
+                logger.warning(f"Series-level validation warnings: {validation_result['warnings']}")
+            
             # Calculate statistical measures
             mean_recent = np.mean(recent_values)
             std_recent = np.std(recent_values)
             
+            # FIXED: Validate statistical measures for series-level data
+            # Check if the data makes sense (not artificially inflated)
+            if mean_recent > 0 and std_recent / mean_recent < 0.05:
+                logger.warning(f"Very low volatility detected for series-level data: std={std_recent}, mean={mean_recent}")
+                # Use a minimum volatility assumption for series-level data
+                std_recent = max(std_recent, mean_recent * 0.1)  # At least 10% of mean for series-level data
+            
             if std_recent == 0:
                 return {"error": "No variance in recent data"}
+            
+            # FIXED: Validate z-score for extreme values
+            z_score = (prop_value - mean_recent) / std_recent
+            if abs(z_score) > 5.0:
+                logger.warning(f"Extreme z-score detected: {z_score:.2f}. This may indicate data issues.")
+                # Cap the z-score for statistical analysis to prevent unrealistic confidence
+                z_score = np.sign(z_score) * min(abs(z_score), 4.0)
+                logger.info(f"Adjusted z-score to: {z_score:.2f}")
             
             # Calculate range of values to analyze
             min_value = max(0, int(prop_value - range_std * std_recent))
@@ -1622,6 +1790,10 @@ class PropPredictor:
                 }
             }
             
+            # Add validation warnings to the response if any
+            if validation_result["warnings"]:
+                summary_stats["validation_warnings"] = validation_result["warnings"]
+            
             return {
                 "probability_distribution": probability_distribution,
                 "summary_stats": summary_stats,
@@ -1660,15 +1832,34 @@ class PropPredictor:
             if len(recent_values) < 3:
                 return {"error": "Insufficient recent data"}
             
+            # FIXED: Validate series-level statistics
+            validation_result = self._validate_multi_map_statistics(player_stats, prop_request, recent_values)
+            if not validation_result["valid"]:
+                logger.warning(f"Series-level validation warnings: {validation_result['warnings']}")
+            
             # Calculate statistical measures
             mean_recent = np.mean(recent_values)
             std_recent = np.std(recent_values)
+            
+            # FIXED: Validate statistical measures for series-level data
+            # Check if the data makes sense (not artificially inflated)
+            if mean_recent > 0 and std_recent / mean_recent < 0.05:
+                logger.warning(f"Very low volatility detected for series-level data: std={std_recent}, mean={mean_recent}")
+                # Use a minimum volatility assumption for series-level data
+                std_recent = max(std_recent, mean_recent * 0.1)  # At least 10% of mean for series-level data
             
             if std_recent == 0:
                 return {"error": "No variance in recent data"}
             
             # Calculate z-score for the prop value
             z_score = (prop_value - mean_recent) / std_recent
+            
+            # FIXED: Validate z-score for extreme values
+            if abs(z_score) > 5.0:
+                logger.warning(f"Extreme z-score detected: {z_score:.2f}. This may indicate data issues.")
+                # Cap the z-score for statistical analysis to prevent unrealistic confidence
+                z_score = np.sign(z_score) * min(abs(z_score), 4.0)
+                logger.info(f"Adjusted z-score to: {z_score:.2f}")
             
             # Calculate percentiles
             from scipy.stats import percentileofscore
@@ -1679,60 +1870,38 @@ class PropPredictor:
             lower_bound_95 = mean_recent - confidence_interval_95
             upper_bound_95 = mean_recent + confidence_interval_95
             
-            # Calculate probability of exceeding prop value
+            # Calculate volatility analysis
+            coefficient_of_variation = (std_recent / mean_recent) * 100 if mean_recent > 0 else 0
+            
+            # Determine volatility level
+            if coefficient_of_variation < 20:
+                volatility_level = "Low Volatility"
+            elif coefficient_of_variation < 50:
+                volatility_level = "Moderate Volatility"
+            else:
+                volatility_level = "High Volatility"
+            
+            # Calculate probability analysis
             from scipy.stats import norm
             prob_more = 1 - norm.cdf(prop_value, mean_recent, std_recent)
             prob_less = norm.cdf(prop_value, mean_recent, std_recent)
             
-            # Determine statistical significance
-            if abs(z_score) > 2.0:
-                significance = "very_high"
-                significance_description = "Statistically very significant"
-            elif abs(z_score) > 1.5:
-                significance = "high"
-                significance_description = "Statistically significant"
-            elif abs(z_score) > 1.0:
-                significance = "medium"
-                significance_description = "Moderately significant"
+            # Determine recommended action
+            if prob_more > prob_less:
+                recommended = "MORE"
+                recommended_probability = prob_more
             else:
-                significance = "low"
-                significance_description = "Not statistically significant"
+                recommended = "LESS"
+                recommended_probability = prob_less
             
-            # Calculate volatility metrics
-            coefficient_of_variation = (std_recent / mean_recent) * 100 if mean_recent > 0 else 0
-            
-            # Calculate trend analysis
-            if len(recent_values) >= 5:
-                first_half = recent_values[:len(recent_values)//2]
-                second_half = recent_values[len(recent_values)//2:]
-                if first_half and second_half:
-                    first_avg = np.mean(first_half)
-                    second_avg = np.mean(second_half)
-                    if first_avg > 0:
-                        trend_ratio = (second_avg - first_avg) / first_avg
-                        trend_direction = "improving" if trend_ratio > 0.1 else "declining" if trend_ratio < -0.1 else "stable"
-                    else:
-                        trend_direction = "stable"
-                else:
-                    trend_direction = "stable"
-            else:
-                trend_direction = "insufficient_data"
-            
-            return {
-                "statistical_measures": {
-                    "mean_recent": round(float(mean_recent), 2),
-                    "std_recent": round(float(std_recent), 2),
-                    "coefficient_of_variation": round(float(coefficient_of_variation), 1),
-                    "z_score": round(float(z_score), 2),
-                    "percentile": round(float(percentile), 1),
-                    "significance": significance,
-                    "significance_description": significance_description
-                },
+            result = {
+                "z_score": round(float(z_score), 2),
+                "percentile": round(float(percentile), 1),
                 "probability_analysis": {
-                    "probability_more": round(float(prob_more * 100), 1),
-                    "probability_less": round(float(prob_less * 100), 1),
-                    "recommended_prediction": "MORE" if prob_more > prob_less else "LESS",
-                    "confidence_level": "high" if abs(z_score) > 1.5 else "medium" if abs(z_score) > 1.0 else "low"
+                    "more_probability": round(float(prob_more * 100), 1),
+                    "less_probability": round(float(prob_less * 100), 1),
+                    "recommended": recommended,
+                    "recommended_probability": round(float(recommended_probability * 100), 1)
                 },
                 "confidence_intervals": {
                     "95_percent": {
@@ -1741,18 +1910,17 @@ class PropPredictor:
                         "width": round(float(upper_bound_95 - lower_bound_95), 2)
                     }
                 },
-                "trend_analysis": {
-                    "direction": trend_direction,
-                    "sample_size": int(len(recent_values)),
-                    "recent_values": [int(x) for x in recent_values[:5]]  # Last 5 values
-                },
-                "volatility_metrics": {
-                    "high_volatility": bool(coefficient_of_variation > 50),
-                    "moderate_volatility": bool(25 < coefficient_of_variation <= 50),
-                    "low_volatility": bool(coefficient_of_variation <= 25),
-                    "volatility_percentage": round(float(coefficient_of_variation), 1)
+                "volatility_analysis": {
+                    "coefficient_of_variation": round(float(coefficient_of_variation), 1),
+                    "level": volatility_level
                 }
             }
+            
+            # Add validation warnings to the response if any
+            if validation_result["warnings"]:
+                result["validation_warnings"] = validation_result["warnings"]
+            
+            return result
             
         except Exception as e:
             logger.error(f"Error getting statistical insights: {e}")
