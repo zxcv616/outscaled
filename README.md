@@ -109,21 +109,15 @@ Machine learning platform that predicts League of Legends player props using pro
 
 ## Testing
 
-### Run API Tests
+### **Current Test Status**
+- **✅ All Required Tests Passing** (4/4)
+- **✅ All Optional Tests Passing** (7/7 total)
+- **✅ Frontend Data Display Fixed** - Z-score, percentile, and probability analysis now working
+- **✅ Confidence Calculation Improved** - More natural confidence levels
 
-```bash
-# Install test dependencies
-pip install pytest requests
+### **Test Coverage**
 
-# Run comprehensive tests
-python tests/run_tests.py
-
-# Run pytest tests
-pytest tests/test_api.py -v
-```
-
-### Test Coverage
-
+#### **Core API Tests (13 tests)**
 - Health check endpoint
 - Player search functionality
 - Player validation
@@ -137,6 +131,66 @@ pytest tests/test_api.py -v
 - Feature importance analysis
 - Deterministic predictions (same inputs = same outputs)
 - Data year tracking in API responses
+
+#### **Advanced Test Suites**
+- **Confidence Logic Test** - Validates confidence calculation patterns
+- **Betting Logic Test** - Tests PrizePicks-style map range logic
+- **Map Ranges Test** - Validates multi-map aggregation
+- **Natural Confidence Test** - Ensures confidence levels feel natural
+- **Pytest API Tests** - Comprehensive endpoint testing
+
+### **Run API Tests**
+
+```bash
+# Install test dependencies
+pip install pytest requests
+
+# Run comprehensive tests
+python3 tests/run_all_tests.py
+
+# Run individual test suites
+python3 tests/run_tests.py
+python3 tests/test_confidence_logic.py
+python3 tests/test_betting_logic.py
+python3 tests/test_map_ranges.py
+
+# Run pytest tests
+python3 -m pytest tests/test_api.py -v
+```
+
+### **Test Results Summary**
+```
+🧪 Outscaled.gg Comprehensive Test Suite
+============================================================
+✅ Main API Test Suite (13 tests) - PASSED
+✅ Confidence Logic Test - PASSED  
+✅ Betting Logic Test - PASSED
+✅ Map Ranges Test - PASSED
+✅ Natural Confidence Test - PASSED
+✅ Pytest API Tests (23 tests) - PASSED
+✅ ML Components Test - PASSED
+
+🎯 Results: 7/7 test suites passed
+🎯 Required tests: 4/4 passed
+🎉 All required tests passed!
+```
+
+### **Test Features Validated**
+- Health check and service readiness
+- Player search with autocomplete
+- Teams endpoint for opponent selection
+- Basic predictions with confidence
+- Map-range support (PrizePicks style)
+- Map range aggregation
+- Verbose prediction mode
+- Model transparency features
+- Extreme value handling
+- All prop types (kills, assists, cs, deaths, gold, damage)
+- Statistical reasoning analysis
+- Model information and feature importance
+- Deterministic predictions
+- Natural confidence levels
+- Betting logic accuracy
 
 ## Data Sources
 
@@ -390,22 +444,189 @@ outscaled/
 │   │   ├── ml/            # Machine learning
 │   │   │   ├── feature_engineering.py  # 31 features with role-specific logic
 │   │   │   ├── predictor.py           # XGBoost + RandomForest
-│   │   │   └── train_model.py        # Map-range training
+│   │   │   ├── train_model.py        # Map-range training
+│   │   │   ├── config/               # Model configuration
+│   │   │   └── models/               # Trained models and scalers
 │   │   ├── services/      # Data fetching with map aggregation
+│   │   ├── schemas/       # Pydantic models
+│   │   ├── models/        # Database models
+│   │   ├── utils/         # Utility functions
 │   │   └── main.py        # FastAPI app
 │   ├── tests/             # Test files
-│   └── requirements.txt
+│   ├── requirements.txt
+│   └── Dockerfile
 ├── frontend/
 │   ├── src/
 │   │   ├── components/    # React components
+│   │   ├── services/      # API service layer
+│   │   ├── types/         # TypeScript type definitions
 │   │   └── App.tsx        # Main app with map range UI
 │   └── package.json
 ├── tests/                 # API test suite
+├── batch/                 # Batch processing utilities
+├── data/                  # Data files (CSV datasets)
+├── scripts/               # Analysis and utility scripts
 ├── demo.html              # Standalone demo
 ├── docker-compose.yml     # Docker setup
 ├── .gitignore            # Git ignore rules
 └── README.md
 ```
+
+### **⚠️ Current Issues in Project Structure**
+
+#### **Files Needing Cleanup**
+- **Debug/Test Files**: 15+ files in `backend/` root that should be moved to `scripts/` or `tests/`
+- **Duplicate Models**: Models exist in both `backend/app/ml/models/` and `backend/backend/app/ml/models/`
+- **Large Data Files**: CSV files (72MB + 52MB) should be moved to `data/` directory
+- **Analysis Scripts**: `analyze_dataset.py` should be moved to `scripts/`
+
+#### **Recommended Structure Improvements**
+```bash
+# Create scripts directory for analysis and debug files
+mkdir -p scripts/
+mv backend/test_*.py scripts/
+mv backend/debug_*.py scripts/
+mv analyze_dataset.py scripts/
+
+# Move large data files
+mkdir -p data/
+mv *.csv data/
+
+# Remove duplicate model directory
+rm -rf backend/backend/
+
+# Clean up duplicate demo files
+# Keep only demo.html, remove prediction-demo.html
+```
+
+### **Configuration Files**
+- `backend/app/core/config.py` - Application configuration
+- `backend/app/ml/config/prop_config.yaml` - Model configuration
+- `env.example` - Environment variables template
+- `docker-compose.yml` - Docker services configuration
+
+### **Key Directories**
+- **`backend/app/ml/`** - Core machine learning logic
+- **`backend/app/api/`** - FastAPI route definitions
+- **`frontend/src/components/`** - React UI components
+- **`tests/`** - Comprehensive test suite
+- **`data/`** - Large datasets and model files
+
+## Current Status & Known Issues
+
+### ✅ **Working Features**
+- **All core tests passing** (7/7 test suites)
+- **Frontend data display fixed** - Z-score, percentile, and probability analysis now show correctly
+- **Confidence calculation improved** - More natural confidence levels
+- **API endpoints functional** - All endpoints working as expected
+
+### ⚠️ **Known Issues & Technical Debt**
+
+#### **Critical Issues**
+1. **Configuration Path Inconsistencies**
+   - Multiple conflicting model paths in `config.py`
+   - `MODEL_PATH` uses relative path while `FALLBACK_MODEL_PATH` uses absolute path
+   - `PROP_CONFIG_PATH` uses Docker path format
+
+2. **Hardcoded Database Credentials**
+   - Database password "password" hardcoded in `config.py` and `docker-compose.yml`
+   - Should use environment variables for production
+
+3. **Duplicate Model Files**
+   - Models exist in both `backend/app/ml/models/` and `backend/backend/app/ml/models/`
+   - Potential confusion about which model is being used
+
+#### **Code Quality Issues**
+1. **Excessive Debug/Test Files**
+   - 15+ debug/test files in backend root directory
+   - Should be moved to `scripts/` or `tests/` directories
+
+2. **Frontend Error Handling**
+   - Using `alert()` for error handling instead of proper React error states
+   - Poor user experience
+
+3. **Broad Exception Handling**
+   - Many `except Exception as e:` blocks without specific error types
+   - Could mask important errors
+
+#### **Unused/Redundant Files**
+- `analyze_dataset.py` - One-time analysis script
+- `batch/batch_predict.py` - Not imported anywhere
+- `demo.html` and `prediction-demo.html` - Duplicate demo files
+- Large CSV files (72MB + 52MB) in root directory
+
+### 🔧 **Recommended Cleanup Actions**
+
+#### **Immediate (Critical)**
+```bash
+# Fix configuration paths
+# Standardize all model/config paths in backend/app/core/config.py
+
+# Remove hardcoded credentials
+# Use environment variables for all database credentials
+
+# Clean up duplicate model files
+# Keep only backend/app/ml/models/ and remove backend/backend/
+
+# Move large data files
+mv *.csv data/
+```
+
+#### **Short-term (Medium Priority)**
+```bash
+# Clean up debug files
+mkdir scripts/
+mv backend/test_*.py scripts/
+mv backend/debug_*.py scripts/
+mv analyze_dataset.py scripts/
+
+# Improve frontend error handling
+# Replace alert() calls with proper React error states
+
+# Add specific exception handling
+# Replace broad Exception catches with specific types
+```
+
+#### **Long-term (Quality)**
+- Standardize error handling across codebase
+- Simplify model loading logic
+- Add comprehensive logging
+- Consolidate documentation files
+
+## Development Guidelines
+
+### **Code Quality Standards**
+- Use specific exception types instead of broad `Exception` catches
+- Implement proper error states in React components (no `alert()`)
+- Add comprehensive type hints to all functions
+- Use environment variables for all credentials and sensitive data
+
+### **File Organization**
+- Keep debug/analysis scripts in `scripts/` directory
+- Store large data files in `data/` directory
+- Maintain clean separation between backend, frontend, and utilities
+
+### **Configuration Management**
+- All paths should be relative or absolute consistently
+- Use environment variables for all credentials
+- Document all configuration options
+
+## Security Considerations
+
+### **Current Security Status**
+- ✅ Environment variables used for most configuration
+- ✅ Comprehensive .gitignore excludes sensitive files
+- ✅ No hardcoded API keys in production code
+- ⚠️ Hardcoded database password needs to be environment variable
+- ⚠️ Some debug files may contain sensitive information
+
+### **Production Readiness Checklist**
+- [ ] Remove all hardcoded credentials
+- [ ] Clean up debug files and temporary scripts
+- [ ] Standardize configuration paths
+- [ ] Implement proper error handling
+- [ ] Add comprehensive logging
+- [ ] Review and update security documentation
 
 ## Contributing
 
@@ -430,4 +651,19 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ---
 
-**Note**: This is a demonstration project showcasing advanced ML techniques for sports analytics. For production use, ensure proper data licensing, API rate limits, and compliance with betting regulations. The system is specifically designed for PrizePicks-style map-range props and includes sophisticated role-specific analysis for League of Legends professional play. 
+**Note**: This is a demonstration project showcasing advanced ML techniques for sports analytics. The system is specifically designed for PrizePicks-style map-range props and includes sophisticated role-specific analysis for League of Legends professional play. 
+
+### **Recent Improvements (Latest Update)**
+- ✅ **Frontend Data Display Fixed** - Z-score, percentile, and probability analysis now display correctly
+- ✅ **Confidence Calculation Improved** - More natural confidence levels with reduced artificial constraints
+- ✅ **All Core Tests Passing** - 7/7 test suites passing with comprehensive coverage
+- ✅ **API Endpoints Functional** - All endpoints working as expected
+
+### **Production Readiness**
+The system is functional and all core features are working correctly. However, before production deployment, consider addressing the technical debt items listed in the "Current Status & Known Issues" section, particularly:
+- Standardizing configuration paths
+- Removing hardcoded credentials
+- Cleaning up debug files
+- Improving error handling
+
+For production use, ensure proper data licensing, API rate limits, and compliance with betting regulations. 

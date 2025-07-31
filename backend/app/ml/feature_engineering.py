@@ -132,12 +132,16 @@ class FeatureEngineer:
             'quarterfinals': 0.7 # Medium-high pressure
         }
         
-        # Feature names list (34 features total: 14 base + 17 derived + 3 recent form)
+        # Feature names list (41 features total: 14 base + 6 long-term + 17 derived + 4 deviation)
         self.feature_names = [
-            # Base features (14)
+            # Base features (14) - Keep existing recent stats
             'avg_kills', 'avg_assists', 'avg_cs', 'avg_deaths', 'avg_gold', 
             'avg_damage', 'avg_vision', 'recent_kills_avg', 'recent_assists_avg', 
             'recent_cs_avg', 'win_rate', 'avg_kda', 'avg_gpm', 'avg_kp_percent',
+            
+            # Long-term averages (6) - NEW: Full dataset averages
+            'longterm_kills_avg', 'longterm_assists_avg', 'longterm_cs_avg',
+            'longterm_kda', 'longterm_gpm', 'longterm_kp_percent',
             
             # Derived features (17)
             'consistency_score', 'recent_form_trend', 'data_source_quality', 
@@ -147,7 +151,10 @@ class FeatureEngineer:
             'objective_control', 'champion_performance_variance', 'role_specific_performance',
             
             # Recent form features (3)
-            'recent_vs_season_ratio', 'recent_win_rate', 'recent_volatility'
+            'recent_vs_season_ratio', 'recent_win_rate', 'recent_volatility',
+            
+            # Deviation & trend features (4) - NEW: Form analysis
+            'form_deviation_ratio', 'form_z_score', 'form_trend', 'form_confidence'
         ]
         
         # Feature families for grouped analysis and ablation tests
@@ -155,16 +162,19 @@ class FeatureEngineer:
             'base': ['avg_kills', 'avg_assists', 'avg_cs', 'avg_deaths', 'avg_gold', 
                     'avg_damage', 'avg_vision', 'recent_kills_avg', 'recent_assists_avg', 
                     'recent_cs_avg', 'win_rate', 'avg_kda', 'avg_gpm', 'avg_kp_percent'],
+            'longterm': ['longterm_kills_avg', 'longterm_assists_avg', 'longterm_cs_avg',
+                        'longterm_kda', 'longterm_gpm', 'longterm_kp_percent'],
             'derived': ['consistency_score', 'recent_form_trend', 'data_source_quality', 
                        'maps_played', 'opponent_strength', 'tournament_tier', 'position_factor',
                        'champion_pool_size', 'team_synergy', 'meta_adaptation', 'pressure_handling',
                        'late_game_performance', 'early_game_impact', 'mid_game_transition',
                        'objective_control', 'champion_performance_variance', 'role_specific_performance'],
-            'recent_form': ['recent_vs_season_ratio', 'recent_win_rate', 'recent_volatility']
+            'recent_form': ['recent_vs_season_ratio', 'recent_win_rate', 'recent_volatility'],
+            'deviation': ['form_deviation_ratio', 'form_z_score', 'form_trend', 'form_confidence']
         }
         
         # Feature version for reproducibility
-        self.feature_version = "v1.3"
+        self.feature_version = "v2.0"
     
     def engineer_features(self, player_stats: Dict, prop_request: Dict, 
                          include_prop_value: bool = False, debug: bool = False,
@@ -245,18 +255,24 @@ class FeatureEngineer:
                     if feature in feature_dict:
                         feature_dict[feature] = 0.0
             
+            # Disable deviation features if flagged
+            if not ablation_flags.get('deviation_features', True):
+                for feature in self.feature_families['deviation']:
+                    if feature in feature_dict:
+                        feature_dict[feature] = 0.0
+            
             return list(feature_dict.values())
         except Exception as e:
             logger.error(f"Error applying ablation flags: {e}")
             return features
     
     def _extract_base_features(self, player_stats: Dict, prop_request: Dict) -> List[float]:
-        """Extract base statistical features"""
+        """Extract base statistical features including long-term averages"""
         try:
             player_name = player_stats.get('player_name', 'unknown')
             
-            # Base statistics (14 features)
-            features = [
+            # Base statistics (14 features) - Keep existing recent stats
+            base_features = [
                 player_stats.get("avg_kills", 0.0),
                 player_stats.get("avg_assists", 0.0),
                 player_stats.get("avg_cs", 0.0),
@@ -273,6 +289,16 @@ class FeatureEngineer:
                 player_stats.get("avg_kp_percent", 0.0)
             ]
             
+            # Long-term averages (6 features) - NEW: Full dataset averages
+            longterm_features = [
+                player_stats.get("longterm_kills_avg", player_stats.get("avg_kills", 0.0)),
+                player_stats.get("longterm_assists_avg", player_stats.get("avg_assists", 0.0)),
+                player_stats.get("longterm_cs_avg", player_stats.get("avg_cs", 0.0)),
+                player_stats.get("longterm_kda", player_stats.get("avg_kda", 0.0)),
+                player_stats.get("longterm_gpm", player_stats.get("avg_gpm", 0.0)),
+                player_stats.get("longterm_kp_percent", player_stats.get("avg_kp_percent", 0.0))
+            ]
+            
             # FIX: Calculate recent averages if they're null
             recent_matches = player_stats.get("recent_matches", [])
             if recent_matches:
@@ -281,21 +307,24 @@ class FeatureEngineer:
                 recent_assists = [m.get("assists", 0) for m in recent_matches[:5]]
                 recent_cs = [m.get("cs", 0) for m in recent_matches[:5]]
                 
-                if recent_kills and features[7] == 0.0:  # recent_kills_avg is null/0
-                    features[7] = sum(recent_kills) / len(recent_kills)
-                if recent_assists and features[8] == 0.0:  # recent_assists_avg is null/0
-                    features[8] = sum(recent_assists) / len(recent_assists)
-                if recent_cs and features[9] == 0.0:  # recent_cs_avg is null/0
-                    features[9] = sum(recent_cs) / len(recent_cs)
+                if recent_kills and base_features[7] == 0.0:  # recent_kills_avg is null/0
+                    base_features[7] = sum(recent_kills) / len(recent_kills)
+                if recent_assists and base_features[8] == 0.0:  # recent_assists_avg is null/0
+                    base_features[8] = sum(recent_assists) / len(recent_assists)
+                if recent_cs and base_features[9] == 0.0:  # recent_cs_avg is null/0
+                    base_features[9] = sum(recent_cs) / len(recent_cs)
+            
+            # Combine base and long-term features
+            features = base_features + longterm_features
             
             return features
             
         except Exception as e:
             logger.error(f"Player {player_stats.get('player_name', 'unknown')}: Error extracting base features: {e}")
-            return [0.0] * 14
+            return [0.0] * 20  # 14 base + 6 long-term features
     
     def _extract_derived_features(self, player_stats: Dict, prop_request: Dict) -> List[float]:
-        """Extract derived/computed features"""
+        """Extract derived/computed features including deviation analysis"""
         try:
             player_name = player_stats.get('player_name', 'unknown')
             
@@ -306,6 +335,9 @@ class FeatureEngineer:
             # Calculate recent form features
             recent_matches = player_stats.get("recent_matches", [])
             recent_form_features = self._calculate_recent_form_features(recent_matches, player_stats)
+            
+            # Calculate deviation features - NEW: Form analysis
+            deviation_features = self._calculate_deviation_features(player_stats, prop_request)
             
             # Derived features (17 features)
             derived_features = [
@@ -331,11 +363,14 @@ class FeatureEngineer:
             # Add recent form features
             derived_features.extend(recent_form_features)
             
+            # Add deviation features - NEW
+            derived_features.extend(deviation_features)
+            
             return derived_features
             
         except Exception as e:
             logger.error(f"Player {player_stats.get('player_name', 'unknown')}: Error extracting derived features: {e}")
-            return [0.0] * 20  # 17 base + 3 recent form features
+            return [0.0] * 24  # 17 base + 3 recent form + 4 deviation features
     
     def _calculate_recent_form_features(self, recent_matches: List[Dict], player_stats: Dict) -> List[float]:
         """Calculate recent form features to better capture recent performance"""
@@ -782,6 +817,116 @@ class FeatureEngineer:
             logger.warning(f"Player {player_name}: Error calculating champion performance variance: {e}")
             return 0.5
     
+    def _calculate_deviation_features(self, player_stats: Dict, prop_request: Dict) -> List[float]:
+        """Calculate deviation features for form analysis"""
+        try:
+            player_name = player_stats.get('player_name', 'unknown')
+            prop_type = prop_request.get('prop_type', 'kills')
+            prop_value = prop_request.get('prop_value', 0.0)
+            recent_matches = player_stats.get('recent_matches', [])
+            
+            if not recent_matches:
+                return [0.5, 0.5, 0.5, 0.5]  # Neutral values if no recent matches
+            
+            # Get recent values for the prop type
+            if prop_type == "kills":
+                recent_values = [m.get("kills", 0) for m in recent_matches[:10]]
+                recent_avg = player_stats.get("recent_kills_avg", 0.0)
+                longterm_avg = player_stats.get("longterm_kills_avg", player_stats.get("avg_kills", 0.0))
+            elif prop_type == "assists":
+                recent_values = [m.get("assists", 0) for m in recent_matches[:10]]
+                recent_avg = player_stats.get("recent_assists_avg", 0.0)
+                longterm_avg = player_stats.get("longterm_assists_avg", player_stats.get("avg_assists", 0.0))
+            elif prop_type == "cs":
+                recent_values = [m.get("cs", 0) for m in recent_matches[:10]]
+                recent_avg = player_stats.get("recent_cs_avg", 0.0)
+                longterm_avg = player_stats.get("longterm_cs_avg", player_stats.get("avg_cs", 0.0))
+            else:
+                recent_values = [m.get("kills", 0) for m in recent_matches[:10]]
+                recent_avg = player_stats.get("recent_kills_avg", 0.0)
+                longterm_avg = player_stats.get("longterm_kills_avg", player_stats.get("avg_kills", 0.0))
+            
+            # Calculate recent average if not available
+            if recent_avg == 0.0 and recent_values:
+                recent_avg = sum(recent_values) / len(recent_values)
+            
+            deviation_features = []
+            
+            # 1. Form Deviation Ratio: recent_avg / longterm_avg
+            if longterm_avg > 0:
+                deviation_ratio = recent_avg / longterm_avg
+                # Cap between 0.1 and 3.0 to prevent extreme values
+                deviation_ratio = min(max(deviation_ratio, 0.1), 3.0)
+            else:
+                deviation_ratio = 1.0  # Neutral if no long-term data
+            deviation_features.append(deviation_ratio)
+            
+            # 2. Form Z-Score: (prop_value - recent_avg) / recent_std
+            if len(recent_values) >= 2:
+                recent_std = np.std(recent_values)
+                if recent_std > 0:
+                    z_score = (prop_value - recent_avg) / recent_std
+                    # Cap z-score to prevent extreme values
+                    z_score = min(max(z_score, -3.0), 3.0)
+                else:
+                    z_score = 0.0  # No variance
+            else:
+                z_score = 0.0  # Not enough data
+            deviation_features.append(z_score)
+            
+            # 3. Form Trend: Linear regression slope of recent performance
+            if len(recent_values) >= 3:
+                # Use last 5 matches for trend calculation
+                trend_values = recent_values[:5]
+                x = np.arange(len(trend_values)).reshape(-1, 1)
+                y = np.array(trend_values).reshape(-1, 1)
+                
+                try:
+                    reg = LinearRegression()
+                    reg.fit(x, y)
+                    slope = reg.coef_[0][0]
+                    
+                    # Normalize slope based on data variance
+                    if len(trend_values) > 1:
+                        data_std = np.std(trend_values)
+                        if data_std > 0:
+                            normalized_slope = slope / data_std
+                            # Cap between -1 and 1
+                            normalized_slope = min(max(normalized_slope, -1.0), 1.0)
+                        else:
+                            normalized_slope = 0.0
+                    else:
+                        normalized_slope = 0.0
+                except:
+                    normalized_slope = 0.0
+            else:
+                normalized_slope = 0.0  # Not enough data
+            deviation_features.append(normalized_slope)
+            
+            # 4. Form Confidence: Based on sample size and data quality
+            if len(recent_values) >= 5:
+                confidence = 1.0  # High confidence with 5+ matches
+            elif len(recent_values) >= 3:
+                confidence = 0.7  # Moderate confidence with 3-4 matches
+            else:
+                confidence = 0.3  # Low confidence with <3 matches
+            
+            # Adjust confidence based on data quality (variance)
+            if len(recent_values) >= 2:
+                data_cv = np.std(recent_values) / np.mean(recent_values) if np.mean(recent_values) > 0 else 0
+                if data_cv > 0.5:  # High variance
+                    confidence *= 0.8  # Reduce confidence for high variance
+                elif data_cv < 0.2:  # Low variance
+                    confidence *= 1.1  # Increase confidence for low variance
+            
+            deviation_features.append(confidence)
+            
+            return deviation_features
+            
+        except Exception as e:
+            logger.warning(f"Player {player_name}: Error calculating deviation features: {e}")
+            return [0.5, 0.5, 0.5, 0.5]  # Neutral values on error
+    
     def _create_minimal_features(self, prop_request: Dict) -> np.ndarray:
         """Create minimal features for fallback cases"""
         try:
@@ -825,6 +970,12 @@ class FeatureEngineer:
             'avg_kda': 'Average KDA ratio',
             'avg_gpm': 'Average gold per minute',
             'avg_kp_percent': 'Average kill participation percentage',
+            'longterm_kills_avg': 'Long-term kills average (full dataset)',
+            'longterm_assists_avg': 'Long-term assists average (full dataset)',
+            'longterm_cs_avg': 'Long-term CS average (full dataset)',
+            'longterm_kda': 'Long-term KDA ratio (full dataset)',
+            'longterm_gpm': 'Long-term gold per minute (full dataset)',
+            'longterm_kp_percent': 'Long-term kill participation percentage (full dataset)',
             'consistency_score': 'Performance consistency score',
             'recent_form_trend': 'Recent form trend (improving/declining)',
             'data_source_quality': 'Quality score of data source',
@@ -844,6 +995,10 @@ class FeatureEngineer:
             'role_specific_performance': 'Role-specific performance score',
             'recent_vs_season_ratio': 'Recent vs season performance ratio',
             'recent_win_rate': 'Recent win rate (last 5 matches)',
-            'recent_volatility': 'Recent performance volatility'
+            'recent_volatility': 'Recent performance volatility',
+            'form_deviation_ratio': 'Form deviation ratio (recent vs long-term average)',
+            'form_z_score': 'Form Z-score (deviation from recent performance mean)',
+            'form_trend': 'Form trend (linear regression slope of recent performance)',
+            'form_confidence': 'Form confidence score (based on sample size and data quality)'
         }
         return descriptions.get(feature_name, 'Unknown feature') 

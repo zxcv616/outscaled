@@ -863,13 +863,13 @@ function App() {
                                 <div className="bg-white p-3 rounded-lg">
                                   <div className="text-sm font-medium text-gray-600">Z-Score</div>
                                   <div className="text-lg font-bold text-gray-800">
-                                    {statisticalData.statistical_insights?.statistical_measures?.z_score || 'N/A'}
+                                    {statisticalData.statistical_insights?.z_score || 'N/A'}
                                   </div>
                                 </div>
                                 <div className="bg-white p-3 rounded-lg">
                                   <div className="text-sm font-medium text-gray-600">Percentile</div>
                                   <div className="text-lg font-bold text-gray-800">
-                                    {statisticalData.statistical_insights?.statistical_measures?.percentile || 'N/A'}%
+                                    {statisticalData.statistical_insights?.percentile || 'N/A'}%
                                   </div>
                                 </div>
                               </div>
@@ -882,19 +882,19 @@ function App() {
                                     <div>
                                       <div className="text-sm text-gray-500">MORE Probability</div>
                                       <div className="text-lg font-bold text-blue-600">
-                                        {statisticalData.statistical_insights.probability_analysis.probability_more || 'N/A'}%
+                                        {statisticalData.statistical_insights.probability_analysis.more_probability || 'N/A'}%
                                       </div>
                                     </div>
                                     <div>
                                       <div className="text-sm text-gray-500">LESS Probability</div>
                                       <div className="text-lg font-bold text-gray-600">
-                                        {statisticalData.statistical_insights.probability_analysis.probability_less || 'N/A'}%
+                                        {statisticalData.statistical_insights.probability_analysis.less_probability || 'N/A'}%
                                       </div>
                                     </div>
                                   </div>
                                   <div className="mt-2 text-sm text-gray-600">
                                     Recommended: <span className="font-medium">
-                                      {statisticalData.statistical_insights.probability_analysis.recommended_prediction || 'N/A'}
+                                      {statisticalData.statistical_insights.probability_analysis.recommended || 'N/A'}
                                     </span>
                                   </div>
                                 </div>
@@ -914,15 +914,14 @@ function App() {
                               )}
 
                               {/* Volatility Metrics */}
-                              {statisticalData.statistical_insights?.volatility_metrics && (
+                              {statisticalData.statistical_insights?.volatility_analysis && (
                                 <div className="bg-white p-4 rounded-lg">
                                   <div className="text-sm font-medium text-gray-600 mb-2">Volatility Analysis</div>
                                   <div className="text-lg font-bold text-gray-800">
-                                    {statisticalData.statistical_insights.volatility_metrics.volatility_percentage || 'N/A'}% CV
+                                    {statisticalData.statistical_insights.volatility_analysis.coefficient_of_variation || 'N/A'}% CV
                                   </div>
                                   <div className="text-sm text-gray-500">
-                                    {statisticalData.statistical_insights.volatility_metrics.high_volatility ? 'High' : 
-                                     statisticalData.statistical_insights.volatility_metrics.moderate_volatility ? 'Moderate' : 'Low'} Volatility
+                                    {statisticalData.statistical_insights.volatility_analysis.level || 'N/A'} Volatility
                                   </div>
                                 </div>
                               )}

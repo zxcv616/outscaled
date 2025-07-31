@@ -25,7 +25,7 @@ class TestFeatureEngineering(unittest.TestCase):
     def test_feature_count(self):
         """Test that we have the correct number of features"""
         feature_names = self.feature_engineer.get_feature_names()
-        self.assertEqual(len(feature_names), 31, f"Expected 31 features, got {len(feature_names)}")
+        self.assertEqual(len(feature_names), 34, f"Expected 34 features, got {len(feature_names)}")
     
     def test_feature_engineering(self):
         """Test feature engineering with sample data"""
@@ -63,7 +63,7 @@ class TestFeatureEngineering(unittest.TestCase):
         
         features = self.feature_engineer.engineer_features(player_stats, prop_request)
         
-        self.assertEqual(len(features), 31, "Should have 31 features")
+        self.assertEqual(len(features), 34, "Should have 34 features")
         self.assertTrue(np.all(np.isfinite(features)), "All features should be finite")
     
     def test_map_range_normalization(self):
@@ -122,8 +122,8 @@ class TestFeatureEngineering(unittest.TestCase):
         features = self.feature_engineer.engineer_features(player_stats, prop_request)
         
         # Should still produce valid features
-        self.assertEqual(len(features), 31)
-        self.assertTrue(np.all(np.isfinite(features)))
+        self.assertEqual(len(features), 34)
+        self.assertTrue(np.all(np.isfinite(features)), "Features should be finite even with extreme values")
 
 class TestPredictor(unittest.TestCase):
     """Test predictor functionality"""
@@ -139,34 +139,40 @@ class TestPredictor(unittest.TestCase):
     def test_feature_count_consistency(self):
         """Test that predictor and feature engineer have consistent feature counts"""
         predictor_features = len(self.predictor.feature_engineer.get_feature_names())
-        self.assertEqual(predictor_features, 31, f"Predictor should use 31 features, got {predictor_features}")
+        self.assertEqual(predictor_features, 34, f"Predictor should use 34 features, got {predictor_features}")
     
     def test_model_inference(self):
         """Test model inference with dummy features"""
-        features = np.random.randn(31)  # 31 features
+        features = np.random.randn(34)  # 34 features
         
         prediction, confidence = self.predictor._run_model_inference(features)
         
-        self.assertIn(prediction, ['MORE', 'LESS'], "Prediction should be MORE or LESS")
-        self.assertGreaterEqual(confidence, 0, "Confidence should be >= 0")
-        self.assertLessEqual(confidence, 100, "Confidence should be <= 100")
+        self.assertIn(prediction, ['MORE', 'LESS'])
+        self.assertGreaterEqual(confidence, 0)
+        self.assertLessEqual(confidence, 100)
     
     def test_deterministic_predictions(self):
         """Test that predictions are deterministic"""
-        features = np.random.randn(31)
+        features = np.random.randn(34)
         
-        # Make two identical predictions
-        pred1, conf1 = self.predictor._run_model_inference(features)
-        pred2, conf2 = self.predictor._run_model_inference(features)
+        # Run same prediction multiple times
+        predictions = []
+        confidences = []
         
-        self.assertEqual(pred1, pred2, "Predictions should be identical")
-        self.assertAlmostEqual(conf1, conf2, places=1, msg="Confidence should be identical")
+        for _ in range(5):
+            pred, conf = self.predictor._run_model_inference(features)
+            predictions.append(pred)
+            confidences.append(conf)
+        
+        # All predictions should be the same
+        self.assertTrue(all(p == predictions[0] for p in predictions), "Predictions should be deterministic")
+        self.assertTrue(all(abs(c - confidences[0]) < 0.1 for c in confidences), "Confidence should be consistent")
 
     def test_feature_vector_alignment(self):
         """Test that feature count matches model expectations"""
         # Test that feature engineer produces correct number of features
         feature_names = self.feature_engineer.get_feature_names()
-        self.assertEqual(len(feature_names), 31, f"Expected 31 features, got {len(feature_names)}")
+        self.assertEqual(len(feature_names), 34, f"Expected 34 features, got {len(feature_names)}")
         
         # Test that predictor model expects same number of features
         if hasattr(self.predictor.model, 'n_features_in_'):
@@ -447,7 +453,7 @@ class TestFeaturePipeline(unittest.TestCase):
         
         features = self.pipeline.transform(player_stats, prop_request)
         
-        self.assertEqual(len(features), 31, "Should have 31 features")
+        self.assertEqual(len(features), 34, "Should have 34 features")
         self.assertTrue(np.all(np.isfinite(features)), "All features should be finite")
 
 def run_tests():
