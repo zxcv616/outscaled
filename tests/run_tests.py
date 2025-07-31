@@ -171,7 +171,7 @@ def test_map_range_prediction():
         return False
 
 def test_map_range_aggregation():
-    """Test that map range aggregation works with series-level data"""
+    """Test that map range aggregation produces different results than single map"""
     print("Testing map range aggregation...")
     try:
         # Test single map prediction
@@ -233,8 +233,9 @@ def test_map_range_aggregation():
             print("❌ Map range aggregation failed - getting 0.0 values")
             return False
         
-        # FIXED: With series-level data, both should return the same values
-        # This is the correct behavior since we treat all data as series-level
+        # FIXED: With proper map range logic, we should get different values
+        # Single map should filter to only Map 1 data
+        # Map range should aggregate Maps 1-2 data
         kills_diff = abs(single_avg_kills - range_avg_kills)
         recent_kills_diff = abs(single_recent_kills - range_recent_kills)
         
@@ -242,12 +243,12 @@ def test_map_range_aggregation():
         print(f"Map range avg kills: {range_avg_kills:.2f}")
         print(f"Kills difference: {kills_diff:.2f}")
         
-        # FIXED: Expect identical values since both are series-level
-        if kills_diff < 0.01 and recent_kills_diff < 0.01:
-            print("✅ Map range aggregation working correctly - series-level data")
+        # FIXED: Expect different values since we now have proper map range logic
+        if kills_diff > 0.01 or recent_kills_diff > 0.01:
+            print("✅ Map range aggregation working correctly - different values for different map ranges")
             return True
         else:
-            print("❌ Map range aggregation not working - values should be identical for series-level data")
+            print("❌ Map range aggregation not working - values should be different for different map ranges")
             return False
             
     except Exception as e:

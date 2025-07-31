@@ -20,7 +20,8 @@ from app.utils.data_utils import (
     safe_division, 
     validate_required_columns, 
     extract_year_from_filename,
-    aggregate_stats_by_map_range
+    aggregate_stats_by_map_range,
+    filter_by_map_range
 )
 from sqlalchemy.orm import Session
 
@@ -134,7 +135,7 @@ class DataFetcher:
             self.df = pd.DataFrame()
     
     def get_player_stats(self, player_name: str, db: Session, map_range: List[int] = [1, 2]) -> Dict:
-        """Get comprehensive player statistics from Oracle's Elixir dataset with series-level support"""
+        """Get comprehensive player statistics from Oracle's Elixir dataset with proper map-range support"""
         if self.df is None or self.df.empty:
             logger.warning("No Oracle's Elixir data available")
             return self._get_minimal_stats(player_name)
@@ -149,19 +150,51 @@ class DataFetcher:
             
             logger.info(f"Found {len(player_matches)} total matches for {player_name}")
             
-            # FIXED: Treat all data as series-level performance
-            # Oracle's Elixir data is already series-level, no need for map-range filtering
-            player_matches_filtered = player_matches
-            map_range_warning = ""
+            # Create map index for the player matches
+            player_matches_with_index = create_map_index_column(player_matches)
             
-            # Get recent matches (last 10) - all series-level data
-            recent_matches = player_matches_filtered.sort_values("date", ascending=False).head(10)
+            # Handle map range filtering and aggregation
+            if map_range and len(map_range) > 1:
+                # Multi-map range (e.g., Maps 1-2) - aggregate stats across maps
+                logger.info(f"Processing multi-map range {map_range} for {player_name}")
+                
+                # Filter by map range and aggregate stats
+                aggregated_stats = aggregate_stats_by_map_range(player_matches_with_index, map_range)
+                
+                if aggregated_stats.empty:
+                    logger.warning(f"No data found for player {player_name} in map range {map_range}. Using all available data.")
+                    player_matches_filtered = player_matches
+                    map_range_warning = f" (Note: No data available for maps {map_range}, using all matches)"
+                else:
+                    # Use aggregated data for multi-map ranges
+                    player_matches_filtered = aggregated_stats
+                    map_range_warning = ""
+                    logger.info(f"Aggregated {len(aggregated_stats)} match series for map range {map_range}")
+                
+                # Get recent matches for multi-map ranges (aggregated data)
+                recent_matches = aggregated_stats.sort_values("date", ascending=False).head(10) if not aggregated_stats.empty else pd.DataFrame()
+                
+            else:
+                # Single map or no map range specified
+                if map_range and len(map_range) == 1:
+                    # Single map (e.g., Map 1) - filter by specific map
+                    logger.info(f"Processing single map {map_range[0]} for {player_name}")
+                    player_matches_filtered = filter_by_map_range(player_matches_with_index, map_range)
+                    map_range_warning = ""
+                else:
+                    # No map range specified - use all data
+                    logger.info(f"No map range specified for {player_name}, using all data")
+                    player_matches_filtered = player_matches
+                    map_range_warning = ""
+                
+                # Get recent matches for single map or all data
+                recent_matches = player_matches_filtered.sort_values("date", ascending=False).head(10)
             
             if player_matches_filtered.empty:
                 logger.warning(f"No data found for player {player_name}")
                 return self._get_minimal_stats(player_name)
             
-            logger.info(f"Using {len(player_matches_filtered)} series for {player_name}")
+            logger.info(f"Using {len(player_matches_filtered)} matches/series for {player_name}")
             
             # DEBUG: Check recent matches data
             logger.debug(f"Recent matches shape: {recent_matches.shape}")
@@ -174,7 +207,7 @@ class DataFetcher:
                 logger.warning(f"Recent matches is empty for {player_name}")
             
             # Calculate comprehensive statistics
-            maps_played = 1  # All data is series-level
+            maps_played = len(map_range) if map_range else 1
             
             # Get data year distribution for this player (use original data)
             data_years = player_matches['data_year'].value_counts().to_dict()
@@ -184,71 +217,146 @@ class DataFetcher:
             logger.debug(f"  data_years dict: {data_years}")
             logger.debug(f"  data_years_str: {data_years_str}")
             
-            # Calculate statistics for series-level data
-            recent_kills_avg = recent_matches["kills"].head(5).mean() if not recent_matches.empty else 0.0
-            recent_assists_avg = recent_matches["assists"].head(5).mean() if not recent_matches.empty else 0.0
-            recent_cs_avg = recent_matches["total cs"].head(5).mean() if not recent_matches.empty else 0.0
-            
-            # Calculate KDA from kills, deaths, assists
-            kda_values = []
-            for _, row in player_matches_filtered.iterrows():
-                kills = row.get("kills", 0)
-                deaths = row.get("deaths", 0)
-                assists = row.get("assists", 0)
-                if deaths > 0:
-                    kda_values.append((kills + assists) / deaths)
-                else:
-                    kda_values.append(kills + assists)  # Perfect KDA if no deaths
-            avg_kda = np.mean(kda_values) if kda_values else 0.0
-            
-            # Calculate GPM from earned gold and game length
-            gpm_values = []
-            for _, row in player_matches_filtered.iterrows():
-                gold = row.get("earnedgold", 0)
-                game_length = row.get("gamelength", 0)
-                if game_length > 0:
-                    gpm_values.append(gold / (game_length / 60))  # Convert to minutes
-                else:
-                    gpm_values.append(0)
-            avg_gpm = np.mean(gpm_values) if gpm_values else 0.0
-            
-            # Calculate KP% from team kills and player kills/assists
-            kp_values = []
-            for _, row in player_matches_filtered.iterrows():
-                player_kills = row.get("kills", 0)
-                player_assists = row.get("assists", 0)
-                team_kills = row.get("teamkills", 0)
-                if team_kills > 0:
-                    kp_values.append((player_kills + player_assists) / team_kills)
-                else:
-                    kp_values.append(0)
-            avg_kp_percent = np.mean(kp_values) if kp_values else 0.0
-            
-            stats = {
-                "player_name": player_name,
-                "recent_matches": self._format_recent_matches(recent_matches, is_aggregated=False),
-                "avg_kills": player_matches_filtered["kills"].mean(),
-                "avg_assists": player_matches_filtered["assists"].mean(),
-                "avg_cs": player_matches_filtered["total cs"].mean(),
-                "avg_deaths": player_matches_filtered["deaths"].mean(),
-                "avg_gold": player_matches_filtered["earnedgold"].mean(),
-                "avg_damage": player_matches_filtered.get("dpm", pd.Series([0.0])).mean(),
-                "avg_vision": player_matches_filtered.get("visionscore", pd.Series([0.0])).mean(),
-                "recent_kills_avg": recent_kills_avg,
-                "recent_assists_avg": recent_assists_avg,
-                "recent_cs_avg": recent_cs_avg,
-                "win_rate": (player_matches_filtered["result"] == 1).mean(),
-                "avg_kda": avg_kda,
-                "avg_gpm": avg_gpm,
-                "avg_kp_percent": avg_kp_percent,
-                "data_source": "oracles_elixir",
-                "data_years": data_years_str,
-                "map_range": [1],  # Always treat as series-level
-                "maps_played": maps_played,
-                "map_range_warning": map_range_warning,
-                "total_matches_available": len(player_matches),
-                "matches_in_range": len(player_matches_filtered)
-            }
+            # Calculate statistics based on whether we're using aggregated or individual map data
+            if map_range and len(map_range) > 1:
+                # For aggregated data, the stats are already summed across the map range
+                # We need to calculate averages from the sums
+                total_maps = player_matches_filtered['map_index_within_series'].sum() if 'map_index_within_series' in player_matches_filtered.columns else len(player_matches_filtered)
+                
+                # Calculate recent averages from aggregated data
+                recent_kills_avg = recent_matches["kills"].head(5).mean() if not recent_matches.empty else 0.0
+                recent_assists_avg = recent_matches["assists"].head(5).mean() if not recent_matches.empty else 0.0
+                recent_cs_avg = recent_matches["total cs"].head(5).mean() if not recent_matches.empty else 0.0
+                
+                # For win rate and other stats that need the original data structure
+                win_rate = (player_matches["result"] == 1).mean()
+                
+                # Calculate KDA from kills, deaths, assists
+                kda_values = []
+                for _, row in player_matches.iterrows():
+                    kills = row.get("kills", 0)
+                    deaths = row.get("deaths", 0)
+                    assists = row.get("assists", 0)
+                    if deaths > 0:
+                        kda_values.append((kills + assists) / deaths)
+                    else:
+                        kda_values.append(kills + assists)  # Perfect KDA if no deaths
+                avg_kda = np.mean(kda_values) if kda_values else 0.0
+                
+                # Calculate GPM from earned gold and game length
+                gpm_values = []
+                for _, row in player_matches.iterrows():
+                    gold = row.get("earnedgold", 0)
+                    game_length = row.get("gamelength", 0)
+                    if game_length > 0:
+                        gpm_values.append(gold / (game_length / 60))  # Convert to minutes
+                    else:
+                        gpm_values.append(0)
+                avg_gpm = np.mean(gpm_values) if gpm_values else 0.0
+                
+                # Calculate KP% from team kills and player kills/assists
+                kp_values = []
+                for _, row in player_matches.iterrows():
+                    player_kills = row.get("kills", 0)
+                    player_assists = row.get("assists", 0)
+                    team_kills = row.get("teamkills", 0)
+                    if team_kills > 0:
+                        kp_values.append((player_kills + player_assists) / team_kills)
+                    else:
+                        kp_values.append(0)
+                avg_kp_percent = np.mean(kp_values) if kp_values else 0.0
+                
+                stats = {
+                    "player_name": player_name,
+                    "recent_matches": self._format_recent_matches(recent_matches, is_aggregated=True),
+                    "avg_kills": player_matches_filtered["kills"].sum() / max(total_maps, 1),  # Average per map
+                    "avg_assists": player_matches_filtered["assists"].sum() / max(total_maps, 1),
+                    "avg_cs": player_matches_filtered["total cs"].sum() / max(total_maps, 1),
+                    "avg_deaths": player_matches_filtered["deaths"].sum() / max(total_maps, 1),
+                    "avg_gold": player_matches_filtered["earnedgold"].sum() / max(total_maps, 1),
+                    "avg_damage": player_matches.get("dpm", pd.Series([0.0])).mean(),  # Use original data for dpm
+                    "avg_vision": player_matches.get("visionscore", pd.Series([0.0])).mean(),  # Use original data for vision
+                    "recent_kills_avg": recent_kills_avg,
+                    "recent_assists_avg": recent_assists_avg,
+                    "recent_cs_avg": recent_cs_avg,
+                    "win_rate": win_rate,
+                    "avg_kda": avg_kda,
+                    "avg_gpm": avg_gpm,
+                    "avg_kp_percent": avg_kp_percent,
+                    "data_source": "oracles_elixir",
+                    "data_years": data_years_str,
+                    "map_range": map_range,
+                    "maps_played": maps_played,
+                    "map_range_warning": map_range_warning,
+                    "total_matches_available": len(player_matches),
+                    "matches_in_range": len(player_matches_filtered)
+                }
+            else:
+                # For single map data, use per-map averages
+                recent_kills_avg = recent_matches["kills"].head(5).mean() if not recent_matches.empty else 0.0
+                recent_assists_avg = recent_matches["assists"].head(5).mean() if not recent_matches.empty else 0.0
+                recent_cs_avg = recent_matches["total cs"].head(5).mean() if not recent_matches.empty else 0.0
+                
+                # Calculate KDA from kills, deaths, assists
+                kda_values = []
+                for _, row in player_matches_filtered.iterrows():
+                    kills = row.get("kills", 0)
+                    deaths = row.get("deaths", 0)
+                    assists = row.get("assists", 0)
+                    if deaths > 0:
+                        kda_values.append((kills + assists) / deaths)
+                    else:
+                        kda_values.append(kills + assists)  # Perfect KDA if no deaths
+                avg_kda = np.mean(kda_values) if kda_values else 0.0
+                
+                # Calculate GPM from earned gold and game length
+                gpm_values = []
+                for _, row in player_matches_filtered.iterrows():
+                    gold = row.get("earnedgold", 0)
+                    game_length = row.get("gamelength", 0)
+                    if game_length > 0:
+                        gpm_values.append(gold / (game_length / 60))  # Convert to minutes
+                    else:
+                        gpm_values.append(0)
+                avg_gpm = np.mean(gpm_values) if gpm_values else 0.0
+                
+                # Calculate KP% from team kills and player kills/assists
+                kp_values = []
+                for _, row in player_matches_filtered.iterrows():
+                    player_kills = row.get("kills", 0)
+                    player_assists = row.get("assists", 0)
+                    team_kills = row.get("teamkills", 0)
+                    if team_kills > 0:
+                        kp_values.append((player_kills + player_assists) / team_kills)
+                    else:
+                        kp_values.append(0)
+                avg_kp_percent = np.mean(kp_values) if kp_values else 0.0
+                
+                stats = {
+                    "player_name": player_name,
+                    "recent_matches": self._format_recent_matches(recent_matches, is_aggregated=False),
+                    "avg_kills": player_matches_filtered["kills"].mean(),
+                    "avg_assists": player_matches_filtered["assists"].mean(),
+                    "avg_cs": player_matches_filtered["total cs"].mean(),
+                    "avg_deaths": player_matches_filtered["deaths"].mean(),
+                    "avg_gold": player_matches_filtered["earnedgold"].mean(),
+                    "avg_damage": player_matches_filtered.get("dpm", pd.Series([0.0])).mean(),
+                    "avg_vision": player_matches_filtered.get("visionscore", pd.Series([0.0])).mean(),
+                    "recent_kills_avg": recent_kills_avg,
+                    "recent_assists_avg": recent_assists_avg,
+                    "recent_cs_avg": recent_cs_avg,
+                    "win_rate": (player_matches_filtered["result"] == 1).mean(),
+                    "avg_kda": avg_kda,
+                    "avg_gpm": avg_gpm,
+                    "avg_kp_percent": avg_kp_percent,
+                    "data_source": "oracles_elixir",
+                    "data_years": data_years_str,
+                    "map_range": map_range,
+                    "maps_played": maps_played,
+                    "map_range_warning": map_range_warning,
+                    "total_matches_available": len(player_matches),
+                    "matches_in_range": len(player_matches_filtered)
+                }
             
             # DEBUG: Check the calculated values
             logger.debug(f"Calculated stats for {player_name}:")

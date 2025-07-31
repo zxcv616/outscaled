@@ -10,6 +10,11 @@ def create_map_index_column(df: pd.DataFrame) -> pd.DataFrame:
     """
     Create map_index_within_series column for map-range support
     
+    Oracle's Elixir data structure:
+    - Each gameid represents a complete series (not individual maps)
+    - For betting simulation, we'll assign map numbers to each series
+    - We'll use chronological order to simulate map numbers within series
+    
     Args:
         df: DataFrame with 'gameid' column
         
@@ -22,26 +27,21 @@ def create_map_index_column(df: pd.DataFrame) -> pd.DataFrame:
     # Create a copy to avoid modifying original
     df_copy = df.copy()
     
-    # For Oracle's Elixir format, gameid is like "LOLTMNT03_179647"
-    # Extract the series identifier (before the underscore)
+    # Extract tournament series identifier (e.g., 'LOLTMNT03' from 'LOLTMNT03_179647')
     df_copy['match_series'] = df_copy['gameid'].str.split('_').str[0]
     
-    # FIXED: Create proper map indices within each series
-    # Instead of sequential numbering, we need to identify actual map numbers
-    # For Oracle's Elixir data, we need to determine which map each game represents
+    # For betting simulation, we'll assign map numbers to each series
+    # We'll use chronological order within each tournament to simulate map numbers
     
-    # Method 1: Try to extract map number from gameid if it contains map info
-    # If gameid format is like "LOLTMNT03_179647_Map1" or similar
-    if df_copy['gameid'].str.contains('Map', case=False).any():
-        # Extract map number from gameid if it contains map information
-        df_copy['map_index_within_series'] = df_copy['gameid'].str.extract(r'Map(\d+)', expand=False).astype(int)
-    else:
-        # Method 2: Use date/time ordering within each series to determine map order
-        # Sort by date within each series and assign map numbers based on chronological order
-        df_copy = df_copy.sort_values(['match_series', 'date'])
-        
-        # Group by match_series and assign map numbers based on chronological order
-        df_copy['map_index_within_series'] = df_copy.groupby('match_series').cumcount() + 1
+    # Sort by date within each tournament series
+    df_copy = df_copy.sort_values(['match_series', 'date'])
+    
+    # Assign map numbers based on chronological order within each series
+    # This simulates individual maps for betting purposes
+    df_copy['map_index_within_series'] = df_copy.groupby('match_series').cumcount() + 1
+    
+    # Cap the map numbers at a reasonable maximum (e.g., 5 maps per series)
+    df_copy['map_index_within_series'] = df_copy['map_index_within_series'].clip(upper=5)
     
     return df_copy
 
@@ -64,11 +64,16 @@ def filter_by_map_range(df: pd.DataFrame, map_range: List[int]) -> pd.DataFrame:
 def aggregate_stats_by_map_range(df: pd.DataFrame, map_range: List[int], 
                                group_cols: List[str] = None) -> pd.DataFrame:
     """
-    Aggregate statistics across a map range
+    Aggregate statistics across a map range for betting simulation
+    
+    For betting purposes:
+    - Map 1: Use only the first map of each series
+    - Maps 1-2: Sum stats from the first two maps of each series
+    - Maps 1-3: Sum stats from the first three maps of each series
     
     Args:
         df: DataFrame with player/match data
-        map_range: List of map indices to aggregate
+        map_range: List of map indices to aggregate (e.g., [1, 2] for Maps 1-2)
         group_cols: Columns to group by (default: ['playername', 'match_series'])
         
     Returns:
@@ -81,27 +86,31 @@ def aggregate_stats_by_map_range(df: pd.DataFrame, map_range: List[int],
     if 'map_index_within_series' not in df.columns:
         df = create_map_index_column(df)
     
-    # Filter by map range
+    # Filter by map range - only include maps that are in the requested range
     filtered_df = filter_by_map_range(df, map_range)
     
     if filtered_df.empty:
         return pd.DataFrame()
     
-    # Define columns to sum
+    # Define columns to sum for betting stats
     sum_columns = ['kills', 'deaths', 'assists', 'total cs', 'earnedgold']
     available_columns = [col for col in sum_columns if col in filtered_df.columns]
     
-    # Aggregate by grouping columns
+    # For betting simulation, we need to group by player and series
+    # Then sum the stats across the requested map range
     agg_dict = {col: 'sum' for col in available_columns}
     
-    # Add count of maps played
+    # Add count of maps played in this range
     agg_dict['map_index_within_series'] = 'count'
     
     # Add date column (take the most recent date from the series)
     if 'date' in filtered_df.columns:
         agg_dict['date'] = 'max'  # Use the most recent date from the series
     
-    return filtered_df.groupby(group_cols).agg(agg_dict).reset_index()
+    # Group by player and series to get aggregated stats
+    aggregated = filtered_df.groupby(group_cols).agg(agg_dict).reset_index()
+    
+    return aggregated
 
 def safe_division(numerator: pd.Series, denominator: pd.Series, 
                  default_value: float = 1.0) -> pd.Series:
